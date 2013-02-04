@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 """
 
     Senorita Plonetool, at your service.
@@ -40,6 +41,7 @@ PACKAGES = [
 "python-imaging",
 "wv",
 "poppler-utils",
+"pwgen"
 ]
 
 # Which Cron script does nightly restarts
@@ -91,6 +93,14 @@ prefix = /opt/local
 """
 
 
+def generate_password():
+    """
+    Generates a random password for UNIX user.
+    """
+    from sh import pwgen
+    return pwgen("32", "1")  # 32 characters long pw
+
+
 def check_known_environment():
     """
     """
@@ -114,6 +124,54 @@ def get_unix_user_home(username):
     """
     """
     return "/home/%s" % username
+
+
+def require_ssh_agent():
+    """
+    Make sure that we use SSH keys from the SSH agent.
+    """
+    if not "SSH_AUTH_SOCK" in os.environ:
+        sys.exit("We can only do this if you are using SSH agent properly with ForwardAgent option: http://opensourcehacker.com/2012/10/24/ssh-key-and-passwordless-login-basics-for-developers/")
+
+
+def ssh_handshake(target):
+    """
+    Make sure we get a remote host added in ~/.ssh/known_hosts in sane manner.
+
+    Make sure we are not asked for a password when doing SSH.
+    """
+    from sh import ssh
+
+    # http://amoffat.github.com/sh/tutorials/2-interacting_with_processes.html
+
+    stdout = os.fdopen(sys.stdout.fileno(), "wb", 0)
+
+    def callback(char, stdin):
+        """
+        Handle SSH input
+        """
+        stdout.write(char.encode())
+
+        # Ugh http://stackoverflow.com/a/4852073/315168
+        callback.aggregated += char
+
+        print callback.aggregated
+
+        if "(yes/no)? " in callback.aggregated:
+            print "Done"
+            stdin.put("yes\n")
+            return True
+
+        # Clear line
+        if char == "\n":
+            callback.aggregated = ""
+
+    callback.aggregated = ""
+
+    parts = target.split(":")
+    host = parts[0]
+    p = ssh("-o", "PreferredAuthentications=publickey", host, "touch ~/plonetool.handshake", _out=callback, _out_bufsize=0, _tty_in=True)
+    p.wait()
 
 
 def create_python_env():
@@ -206,8 +264,8 @@ def create_plone_unix_user(site_name):
 
     if not has_user(name):
         print "Creating UNIX user: %s" % name
-        print "Please give a random password"
-        adduser(name)
+        adduser("--disabled-password", "--gecos", '""', "--shell", "/bin/zsh", name)
+        print "Password is disabled. Use sudo to play around as %s." % name
 
     return name
 
@@ -219,22 +277,35 @@ def give_user_ztanesh(unix_user):
     from sh import git
     from sh import chsh
 
-    home = get_unix_user_home()
+    home = get_unix_user_home(unix_user)
 
     # Install ZtaneSH
-    if not os.path.exist("/home/%s/tools/" % home):
+    if not os.path.exists("%s/tools" % home):
 
         print "Installing ZtaneSH for user %s" % unix_user
 
         with sudo(i=True, u=unix_user, _with=True):
             cd(home)
-            git("clone", "git://github.com/miohtama/ztanesh.git")
-            run = Command("/home/%s/tools/setup.zsh" % home)
+            git("clone", "git://github.com/miohtama/ztanesh.git", "tools")
+            setup = "%s/tools/zsh-scripts/setup.zsh" % home
+            run = Command(setup)
             run()
 
     # Set user default shell
     with sudo:
         chsh("-s", "/bin/zsh", unix_user)
+
+
+def reset_permissions(username, folder):
+    """
+    Reset UNIX file permissions on a Plone folder.
+    """
+    from sh import chmod
+
+    print "Re(setting) file permissions on %s" % folder
+    # Disable read access for other UNIX users
+    chown("-R", "%s:%s" % (username, username), folder)
+    chmod("-R", "o-rwx", folder)
 
 
 def create_site_base(site_name):
@@ -247,24 +318,84 @@ def create_site_base(site_name):
 
     username = create_plone_unix_user(site_name)
 
+    # Enable friendly
+    give_user_ztanesh(username)
+
     folder = get_site_folder(site_name)
 
     with sudo:
-        install("-d", "/srv/plone/%s" % folder)
-        chown("-R", "%s:%s" % (username, username), folder)
+        print "Creating a Plone site %s folder %s" % (site_name, folder)
+        install("-d", folder)
+        reset_permissions(username, folder)
+
+    print "Site base (re)created: %s" % folder
 
 
-def migrate_site(name, source):
+def copy_site_files(source, target):
     """
+    Rsync all non-regeneratable Plone files
+
+    http://plone.org/documentation/kb/copying-a-plone-site
     """
-    pass
+
+    # Make sure we can SSH into to the box without interaction
+    ssh_handshake(source)
+
+    def process_output(line):
+        """
+        Echo rsync progress
+        """
+        print line
+
+    print "Copying site files from: %s" % source
+    from sh import rsync
+    rsync("-a", "-v", "--compress-level=9", "--inplace", "--progress", "--exclude", "*.log", "--exclude", "eggs", "--exclude", "downloads", "--exclude", "parts", "%s/*" % source, target, _out=process_output, _err=process_output).wait()
+
+    # Rercreate regeneratable folders
+    install("-d", "%s/eggs" % target)
+    install("-d", "%s/parts" % target)
+    install("-d", "%s/downloads" % target)
+
+
+def rebootstrap_site(name, folder, python):
+    """
+    Re-run buildout
+    """
+    cd(folder)
+    python = Command(python)
+    python("bootstrap.py")
+    Command("%s/bin/buildout")()
+
+
+def migrate_site(name, source, python):
+    """
+    Migrate a Plone site from another server.
+    """
+
+    require_ssh_agent()
+
+    create_site_base(name)
+
+    folder = get_site_folder(name)
+    unix_user = get_unix_user(name)
+
+    with sudo(H=True, u=unix_user, _with=True):
+        folder = get_site_folder(name)
+        copy_site_files(source, folder)
+        #rebootstrap_site(name, folder, python)
+
+    # Make sure all file permissions are sane after migration
+    reset_permissions(unix_user, folder)
 
 
 @plac.annotations( \
-    create=("Create a new Plone site installation with UNIX user under /srv/plone", "flag", "c"),
+    create=("Create an empty Plone site installation under under /srv/plone with matching UNIX user", "flag", "c"),
+    migrate=("Migrate a Plone site from an existing server", "flag", "m"),
+    python=("Which Python interpreter is used for a migrated site", "option", "p", None, None, "/srv/plone/python/python-2.7/bin/python"),
     name=("Installation name", "positional", None, None, None, "yourplonesite"),
+    source=("SSH source for the site", "positional", None, None, None, "user@server.com/~folder"),
     )
-def main(create, name):
+def main(create, migrate, python, name, source=None):
     """
     A sysadmin utility to set-up multihosting Plone environment, create Plone sites and migrate existing ones.
 
@@ -273,6 +404,8 @@ def main(create, name):
 
     if create:
         create_site_base(name)
+    elif migrate:
+        migrate_site(name, source, python)
     else:
         sys.exit("Please give an action")
 

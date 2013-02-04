@@ -5,18 +5,24 @@ Introduction
 
 ``plonetool`` command which allows you to easily create and migrate sites in ``/srv/plone``.
 
-Support Ubuntu / Debian servers.
+Support Ubuntu / Debian servers. Tested with Ubuntu 12.04 LTS.
 
 This tool is designed for a multisite hosting where
 
-* One server hosts multiple Plone sites
+* One server hosts multiple Plone sites in ``/srv/plone`` folder, as per guidelines
+  `Linux Filesystem Hierarchy <http://www.tldp.org/LDP/Linux-Filesystem-Hierarchy/html/srv.html>`_.
+  Currently the script does not allow other file system layouts to be used, but supporting them
+  is easy.
 
-* These sites share the same Python installation which is created by the script
+* These sites share the same Python installation which is created by `collective.buildout.python <https://github.com/collective/buildout.python>`_. Currently other kind of Python set-ups are not supported.
 
 * Some additional security barries is put in the place by setting one UNIX user
   per site
 
 * Some basic automated site maintenance is put in the place: nighly restart cron job, automatic site database packaging, site start up when the server goes up, log rotate
+
+The script assumes a clean server installation, so it will do everything for you
+starting from installing the system packages.
 
 Installation
 ==============
@@ -37,6 +43,9 @@ Now you have command ``plonetool`` in PATH from ``venv/bin/plonetool``.
 Usage
 ======
 
+Because this script will ``sudo`` to different UNIX users assuming no password prompt the only sensible
+way to run this script is as a root.
+
 Create a Plone site
 ----------------------
 
@@ -50,7 +59,7 @@ Does
 
 * Creates UNIX user *mysitename*
 
-* Installs ZtaneSH for this user
+* Installs more friendly shell, `ZtaneSH <https://github.com/miohtama/ztanesh>`_, for this user
 
 * Creates /srv/plone/mysitename
 
@@ -67,12 +76,57 @@ Migrate a Plone
 
 Copies a site (over SSH) from a source server to this server.
 
+- Copies site buildout, site data and custom src/
 
+- Rebootstraps buildout on the new server
+
+- You can specify a Python version for old Plone sites
+
+`Read basics about SSH first <http://opensourcehacker.com/2012/10/24/ssh-key-and-passwordless-login-basics-for-developers/>`_.
+
+Example::
+
+    # Start on your local computer
+    # Setup passwordless SSH key exchange to the old server
+    ssh-copy-id user@oldserver.com
+
+    # Now SSH into the new server
+    # Make sure you have ssh'ed to the server using ForwardAgent option
+    ssh -A root@newserver.com
+
+    # Migrate the site from the old server
+    plonetool --migrate newsitename oldunixuser@oldserver.example.com:/srv/plone/oldsite
+
+    # You can retype the command to resume migration
+
+You can also migrate Plone 3.3 site using automatically installde ``/srv/plone/python/python-2.4/bin/python``::
+
+    plonetool --migrate --python /srv/plone/python/python-2.4/bin/python newsitename oldunixuser@oldserver.example.com:/srv/plone/oldsite
+
+`More info about copying Plone sites <http://plone.org/documentation/kb/copying-a-plone-site>`_
+
+Security notes
+==================
+
+This script plainly accepts any SSH hosts you give it without allowing
+you manually to check ``known_hosts`` fingerprints. Please check all
+host fingerprints before using the script.
 
 Requirements for Plone site to co-operate
 ========================================================
 
 Your Plone buildout installation must come with functionality ``plonectl`` command.
+
+Add it to your buildout if needed::
+
+    xxx
+
+Pass
+
+Other
+=============
+
+The script heavily uses `Python sh package <http://amoffat.github.com/sh/>`_.
 
 Development
 ==============
@@ -81,5 +135,5 @@ Keep your script automatically synced on the server when editing files locally::
 
     . venv/bin/activate
     pip install watchdog
-    watchmedo shell-command --recursive --command='rsync -av --exclude=venv --exclude=.git . yourserver:~/senorita.plonetool'
+    watchmedo shell-command --patterns="*.py" --recursive --command='rsync -av --exclude=venv --exclude=.git . yourserver:~/senorita.plonetool'
 
