@@ -4,7 +4,7 @@ import os
 version = '1.0'
 
 long_description = (
-    open('README.txt').read()
+    open('README.rst').read()
     + '\n' +
     'Contributors\n'
     '============\n'
@@ -24,20 +24,24 @@ setup(name='senorita.plonetool',
         "Programming Language :: Python",
         ],
       keywords='',
-      author='',
-      author_email='',
-      url='http://svn.plone.org/svn/collective/',
-      license='gpl',
+      author='Mikko Ohtamaa',
+      author_email='mikko@opensourcehacker.com',
+      url='https://github.com/miohtama/senorita.plonetool',
+      license='GPL2',
       packages=find_packages('src'),
-      package_dir = {'': 'src'},
+      package_dir={'': 'src'},
       namespace_packages=['senorita'],
       include_package_data=True,
       zip_safe=False,
       install_requires=[
           'setuptools',
+          'plac',
+          'sh'
           # -*- Extra requirements: -*-
       ],
       entry_points="""
       # -*- Entry points: -*-
+      [console_scripts]
+      plonetool = senorita.plonetool.main:entry_point
       """,
       )
