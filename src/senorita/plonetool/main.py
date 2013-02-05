@@ -4,7 +4,7 @@
 
     Senorita Plonetool, at your service.
 
-    From Brazil with love.
+    From Brazil with love <3
 
 """
 
@@ -53,17 +53,12 @@ CRON_JOB = "/etc/cron.daily/restart-plones"
 
 CRON_TEMPLATE = """#!/bin/sh
 #
-# This cron job will restart Plone sites on this server daily
+# This cron job will restart Plone sites on this server nightly
 #
-/srv/plone/restart-all.sh
 
+/root/senorita.plonetool/venv/bin/plonetool --restart
 """
 
-RESTART_ALL_TEMPLATE = """#!/bin/sh
-# Restart all the sites on a server
-
-
-"""
 
 #: Generated shell script template to use visudo
 #: to add options to /etc/sudoers
@@ -110,6 +105,85 @@ eggs-directory = eggs
 prefix = /opt/local
 """
 
+# Debian init.d compatible script
+DEBIAN_BOOT_TEMPLATE = """#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          %(name)s
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
+# Should-Start:      my plone site
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Start Plone %(name)s
+# Description:       Start Plone instance at %(folder)s
+#
+#
+#
+#
+### END INIT INFO
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+[ -f %(folder)s/bin/plonectl ] || exit 0
+
+DAEMON=%(folder)s/bin/plonectl
+NAME="%(name)s"
+DESC="Plone site at %(folder)s"
+
+. /lib/lsb/init-functions
+
+case "$1" in
+    start)
+        log_daemon_msg "Starting $DESC" "$NAME"
+        if start-stop-daemon --quiet --oknodo --chuid %(user)s:%(user)s \
+                             --exec ${DAEMON} --start start
+        then
+            log_end_msg 0
+        else
+            log_end_msg 1
+        fi
+        ;;
+
+    stop)
+        log_daemon_msg "Stopping $DESC" "$NAME"
+        if start-stop-daemon --quiet --oknodo --chuid %(user)s:%(user)s \
+                             --exec ${DAEMON} --start stop
+        then
+            log_end_msg 0
+        else
+            log_end_msg 1
+        fi
+        ;;
+
+    restart)
+        log_daemon_msg "Restarting $DESC" "$NAME"
+        if start-stop-daemon --quiet --oknodo --chuid %(user)s:%(user)s \
+                             --exec ${DAEMON} --start restart
+        then
+            log_end_msg 0
+        else
+            log_end_msg 1
+        fi
+        ;;
+
+    status)
+        start-stop-daemon --chuid %(user)s:%(user)s \
+                            --exec ${DAEMON} --start status
+        ;;
+
+    force-reload)
+        echo "Plone doesn't support force-reload, use restart instead."
+        ;;
+
+    *)
+        echo "Usage: /etc/init.d/%(name)s {start|stop|status|restart}"
+        exit 1
+        ;;
+esac
+
+exit 0
+"""
+
 # How fast Plone site bin/instance must come up before
 # we assume it's defunct
 MAX_PLONE_STARTUP_TIME = 300
@@ -125,6 +199,7 @@ def generate_password():
 
 def check_known_environment():
     """
+    See that we run on a supported box.
     """
     n = uname("-a").lower()
     if not ("debian" in n or "ubuntu" in n):
@@ -132,6 +207,9 @@ def check_known_environment():
 
 
 def get_site_folder(site_name):
+    """
+    Where our Plone installation will be.
+    """
     return "/srv/plone/%s" % site_name
 
 
@@ -144,6 +222,7 @@ def get_unix_user(site_name):
 
 def get_unix_user_home(username):
     """
+    Where is home folder for a UNIX user
     """
     return "/home/%s" % username
 
@@ -160,6 +239,19 @@ def process_unbuffered_output(char, stdin):
     _unbuffered_stdout.write(char)
 
 
+def has_line(path, line):
+    """
+    Check if a certain file has a given line.
+    """
+    from sh import grep
+
+    # Check if we have the option already in /etc/sudoers
+    # http://man.cx/grep#heading14 -> 1 == no lines
+    grep_status = grep(line, path, _ok_code=[0, 1]).exit_code
+
+    return grep_status == 0
+
+
 def add_sudoers_option(line):
     """
     Adds a option to /etc/sudoers file in safe manner.
@@ -169,15 +261,11 @@ def add_sudoers_option(line):
     http://stackoverflow.com/a/3706774/315168
     """
 
-    from sh import grep, chmod, rm
+    from sh import chmod, rm
 
     with sudo:
 
-        # Check if we have the option already in /etc/sudoers
-        # http://man.cx/grep#heading14 -> 1 == no lines
-        grep_status = grep('%s' % line, "/etc/sudoers", _ok_code=[0, 1]).exit_code
-
-        if grep_status == 1:
+        if not has_line("/etc/sudoers", line):
 
             print "Updating /etc/sudoers to enable %s" % line
 
@@ -284,6 +372,12 @@ def create_python_env():
             python("bootstrap.py")
             run = Command("/srv/plone/python/bin/buildout")
             run()
+
+
+def set_plone_restart_on_reboot():
+    """
+
+    """
 
 
 def create_base():
@@ -399,6 +493,35 @@ def reset_permissions(username, folder):
     chmod("-R", "o-rwx", folder)
 
 
+def create_site_initd_script(name):
+    """
+    Install /etc/init.d boot script for a Plone site.
+
+    We do this Ubuntu style, not sure if works 100% on Debian.
+
+    http://wiki.debian.org/LSBInitScripts
+
+    http://developer.plone.org/hosting/restarts.html#lsbinitscripts-starting-with-debian-6-0
+    """
+
+    from sh import chmod
+
+    updaterc = Command("/usr/sbin/update-rc.d")
+
+    username = create_plone_unix_user(name)
+    folder = get_site_folder(name)
+
+    script_body = DEBIAN_BOOT_TEMPLATE % dict(user=username, folder=folder, name=name)
+
+    initd_script = "/etc/init.d/%s" % name
+
+    print "Creating start/stop script %s" % initd_script
+    with sudo:
+        echo(script_body, _out=initd_script)
+        chmod("u+x", initd_script)
+        updaterc(name, "defaults")
+
+
 def create_site_base(site_name):
     """
     Each sites has its own subfolder /srv/plone/xxx and
@@ -418,6 +541,8 @@ def create_site_base(site_name):
         print "Creating a Plone site %s folder %s" % (site_name, folder)
         install("-d", folder)
         reset_permissions(username, folder)
+
+    create_site_initd_script(site_name)
 
     print "Site base (re)created: %s" % folder
 

@@ -94,6 +94,8 @@ Does
 
 * Creates /srv/plone/mysitename
 
+* Creates Ubuntu/Debian LBS start/stop script in /etc/init.d
+
 * Sets up automatic restart in /etc/cron.daily/plone-restarts
 
 * Sets up log rotate
