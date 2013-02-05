@@ -1,5 +1,5 @@
 from setuptools import setup, find_packages
-import os
+
 
 version = '1.0'
 
@@ -36,7 +36,8 @@ setup(name='senorita.plonetool',
       install_requires=[
           'setuptools',
           'plac',
-          'sh'
+          'sh',
+          'requests'
           # -*- Extra requirements: -*-
       ],
       entry_points="""

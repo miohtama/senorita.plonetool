@@ -77,8 +77,39 @@ You can execute Plone tool directly from its installation location::
 
     /root/senorita.plonetool/venv/bin/plonetool
 
-Create a Plone site
-----------------------
+List Plone versions
+-------------------------------------
+
+This command gets available Plone versions from `Github installer repo <https://github.com/plone/Installers-UnifiedInstaller>`_.
+
+Example::
+
+    plonetool --ploneversions
+
+
+Install a Plone versions
+-------------------------------------
+
+This command creates a server deployment structure needed to host a Plone site
+(see creating an empty Plone installation below) and installs a named Plone
+version there from Github.
+
+The site is integrated with the server maintenance structure (init.d, log rotate, etc.)
+as described below.
+
+To install the latest version::
+
+    plonetool --install yoursitename #
+
+Or::
+
+    plonetool --version 4.2 --install yoursitename
+
+
+Create an empty Plone installation
+-------------------------------------
+
+This command creates an empty server structure where you can drop in your Plone site.
 
 Example::
 
@@ -94,15 +125,15 @@ Does
 
 * Creates /srv/plone/mysitename
 
-* Creates Ubuntu/Debian LBS start/stop script in /etc/init.d
+* Creates Ubuntu/Debian LBS start/stop script in ``/etc/init.d``
 
 * Sets up automatic restart in /etc/cron.daily/plone-restarts
 
 * Sets up log rotate
 
-Does not
+Does not do
 
-* Set up backup
+* Set up site backups
 
 Migrate a Plone
 ----------------------

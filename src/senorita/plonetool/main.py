@@ -13,13 +13,17 @@ import sys
 import pwd
 import tempfile
 import time
+import json
 
 import plac
+import requests
 
 # Commands avail on all UNIXes
 # http://amoffat.github.com/sh/
 from sh import sudo, install, echo, uname, python, which
 from sh import cd, chown, Command
+
+from .utils import read_template
 
 # Debian packages we need to install to run out Plone hocus pocus
 # http://plone.org/documentation/manual/installing-plone/installing-on-linux-unix-bsd/debian-libraries
@@ -50,143 +54,27 @@ PACKAGES = [
 # Which Cron script does nightly restarts
 CRON_JOB = "/etc/cron.daily/restart-plones"
 
-
-CRON_TEMPLATE = """#!/bin/sh
-#
-# This cron job will restart Plone sites on this server nightly
-#
-
-/root/senorita.plonetool/venv/bin/plonetool --restart
-"""
-
+# Cron job file contents for nightly Plone site rsetarts
+CRON_TEMPLATE = read_template("cron-job.sh")
 
 #: Generated shell script template to use visudo
 #: to add options to /etc/sudoers
-ADD_LINE_VISUDO = """#!/bin/bash
-
-set -e
-
-if [ ! -z "$1" ]; then
-        echo "" >> $1
-        echo "{line}" >> $1
-else
-        export EDITOR=$0
-        visudo
-fi
-"""
+ADD_LINE_VISUDO = read_template("add_line_visudo.sh")
 
 # buildout.cfg override for buildout.python recipe
 # Only install Pythons necessary for runnign Plone 3.x, Plone 4.x
-PYTHON_BUILDOUT = """
-[buildout]
-extends =
-    src/base.cfg
-    src/readline.cfg
-    src/libjpeg.cfg
-    src/python24.cfg
-    src/python27.cfg
-    src/links.cfg
-
-parts =
-    ${buildout:base-parts}
-    ${buildout:readline-parts}
-    ${buildout:libjpeg-parts}
-    ${buildout:python24-parts}
-    ${buildout:python27-parts}
-    ${buildout:links-parts}
-
-python-buildout-root = ${buildout:directory}/src
-
-# we want our own eggs directory and nothing shared from a
-# ~/.buildout/default.cfg to prevent any errors and interference
-eggs-directory = eggs
-
-[install-links]
-prefix = /opt/local
-"""
+PYTHON_BUILDOUT = read_template("python-buildout.cfg")
 
 # Debian init.d compatible script
-DEBIAN_BOOT_TEMPLATE = """#!/bin/sh
-### BEGIN INIT INFO
-# Provides:          %(name)s
-# Required-Start:    $remote_fs $syslog
-# Required-Stop:     $remote_fs $syslog
-# Should-Start:      my plone site
-# Default-Start:     2 3 4 5
-# Default-Stop:      0 1 6
-# Short-Description: Start Plone %(name)s
-# Description:       Start Plone instance at %(folder)s
-#
-#
-#
-#
-### END INIT INFO
-
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-
-[ -f %(folder)s/bin/plonectl ] || exit 0
-
-DAEMON=%(folder)s/bin/plonectl
-NAME="%(name)s"
-DESC="Plone site at %(folder)s"
-
-. /lib/lsb/init-functions
-
-case "$1" in
-    start)
-        log_daemon_msg "Starting $DESC" "$NAME"
-        if start-stop-daemon --quiet --oknodo --chuid %(user)s:%(user)s \
-                             --exec ${DAEMON} --start start
-        then
-            log_end_msg 0
-        else
-            log_end_msg 1
-        fi
-        ;;
-
-    stop)
-        log_daemon_msg "Stopping $DESC" "$NAME"
-        if start-stop-daemon --quiet --oknodo --chuid %(user)s:%(user)s \
-                             --exec ${DAEMON} --start stop
-        then
-            log_end_msg 0
-        else
-            log_end_msg 1
-        fi
-        ;;
-
-    restart)
-        log_daemon_msg "Restarting $DESC" "$NAME"
-        if start-stop-daemon --quiet --oknodo --chuid %(user)s:%(user)s \
-                             --exec ${DAEMON} --start restart
-        then
-            log_end_msg 0
-        else
-            log_end_msg 1
-        fi
-        ;;
-
-    status)
-        start-stop-daemon --chuid %(user)s:%(user)s \
-                            --exec ${DAEMON} --start status
-        ;;
-
-    force-reload)
-        echo "Plone doesn't support force-reload, use restart instead."
-        ;;
-
-    *)
-        echo "Usage: /etc/init.d/%(name)s {start|stop|status|restart}"
-        exit 1
-        ;;
-esac
-
-exit 0
-"""
+DEBIAN_BOOT_TEMPLATE = read_template("lsb-init.template.sh")
 
 # How fast Plone site bin/instance must come up before
 # we assume it's defunct
 MAX_PLONE_STARTUP_TIME = 300
+
+
+# plac subcommands http://plac.googlecode.com/hg/doc/plac.html#implementing-subcommands
+commands = 'create', 'migrate', 'versions', 'restart', 'check', 'find'
 
 
 def generate_password():
@@ -374,12 +262,6 @@ def create_python_env():
             run()
 
 
-def set_plone_restart_on_reboot():
-    """
-
-    """
-
-
 def create_base():
     """
     Create multisite Plone hosting infrastructure on a server..
@@ -458,6 +340,8 @@ def create_plone_unix_user(site_name):
 def give_user_ztanesh(unix_user):
     """
     Make sure our UNIX user runs ZtaneSH shell it is more productive to work with Plone sites.
+
+    https://github.com/miohtama/ztanesh
     """
     from sh import git
     from sh import chsh
@@ -483,7 +367,9 @@ def give_user_ztanesh(unix_user):
 
 def reset_permissions(username, folder):
     """
-    Reset UNIX file permissions on a Plone folder.
+    Reset UNIX file permissions on a Plone installation folder.
+
+    We set files readable only by the owner.
     """
     from sh import chmod
 
@@ -522,27 +408,32 @@ def create_site_initd_script(name):
         updaterc(name, "defaults")
 
 
-def create_site_base(site_name):
+@plac.annotations(
+    name=("Installation name under /srv/plone", "positional", None, None, None, "yourplonesite"),
+    )
+def create_site_base(name):
     """
-    Each sites has its own subfolder /srv/plone/xxx and
+    Create an empty Plone site installation and corresponding UNIX user.
+
+    Each sites has its own subfolder /srv/plone/xxx.
     """
     check_known_environment()
 
     create_base()
 
-    username = create_plone_unix_user(site_name)
+    username = create_plone_unix_user(name)
 
     # Enable friendly
     give_user_ztanesh(username)
 
-    folder = get_site_folder(site_name)
+    folder = get_site_folder(name)
 
     with sudo:
-        print "Creating a Plone site %s folder %s" % (site_name, folder)
+        print "Creating a Plone site %s folder %s" % (name, folder)
         install("-d", folder)
         reset_permissions(username, folder)
 
-    create_site_initd_script(site_name)
+    create_site_initd_script(name)
 
     print "Site base (re)created: %s" % folder
 
@@ -589,7 +480,7 @@ def rebootstrap_site(name, folder, python):
         _err=_unbuffered_stdout).wait()
 
 
-def migrate_site(name, source, python):
+def migrate(name, source, python):
     """
     Migrate a Plone site from another server.
     """
@@ -613,16 +504,24 @@ def migrate_site(name, source, python):
     # Make sure all file permissions are sane after migration
     reset_permissions(unix_user, folder)
 
-    sanity_check(name)
+    check(name)
 
     print "Migrated site %s and it appears to be working" % name
 
 
-def sanity_check(name):
+def check(name):
     """
     Check that the site is ok for this script and related sysdmin tasks.
     """
     folder = get_site_folder(name)
+
+    user = get_unix_user(name)
+
+    if not os.path.exist(folder):
+        sys.exit("Folder does not exist: %s" % folder)
+
+    if not has_user(user):
+        sys.exit("No UNIX user on the server: %s" % user)
 
     # Detect a running Plone site by a ZODB database lock file
     if os.path.exists(os.path.join(folder, "var", "Data.fs.lock")):
@@ -649,7 +548,7 @@ def sanity_check(name):
         plonectl("fg", "instance", _timeout=MAX_PLONE_STARTUP_TIME).wait()
 
 
-def find_plone_sites(root):
+def find_plone_sites(root="/srv/plone"):
     """
     Return all Plone installations under a certain folder.
 
@@ -683,14 +582,14 @@ def find_plone_sites(root):
     return result
 
 
-def buildout_sanity_check(name):
+def buildout_check(name):
     """
     Checks that a buildout work.
     """
     pass
 
 
-def restart_all():
+def restart():
     """
     Restart all sites installed on the server.
 
@@ -723,30 +622,107 @@ def restart_all():
         cmd("start")
 
 
+def get_plone_versions():
+    """
+    Use Github API to get released Plone unified installer version tags.
+    """
+
+    # Plone unified installer base
+    repo = "https://api.github.com/repos/plone/Installers-UnifiedInstaller/tags"
+
+    # Let's do it with requets lib
+    r = requests.get(repo)
+    if not r.ok:
+        sys.exit("Failed to load Plone version info from %s" % repo)
+
+    data = json.loads(r.content)
+
+    versions = []
+    for tag in data:
+        # {u'commit': {u'url': u'https://api.github.com/repos/plone/Installers-UnifiedInstaller/commits/91ebd0b0ca07642cbb51adb16901d6212ad7f349', u'sha': u'91ebd0b0ca07642cbb51adb16901d6212ad7f349'}, u'tarball_url': u'https://api.github.com/repos/plone/Installers-UnifiedInstaller/tarball/4.1.4', u'name': u'4.1.4', u'zipball_url': u'https://api.github.com/repos/plone/Installers-UnifiedInstaller/zipball/4.1.4'}
+        versions.append(tag["name"])
+
+    versions.sort()
+    versions.reverse()
+
+    return versions
+
+
+def print_plone_versions():
+    """
+    Print available Plone installers from Github
+    """
+    versions = get_plone_versions()
+    project_url = "https://github.com/plone/Installers-UnifiedInstaller"
+    print "Currently available Plone versions at %s" % project_url
+    for v in versions:
+        print "   %s" % v
+
+
+def install_plone(name, python, version):
+    """
+    Installs a new Plone site using best practices.
+    """
+
+    from sh import git, bash
+
+    folder = get_site_folder(name)
+    unix_user = get_unix_user(name)
+
+    # Resolve the latest version
+    if version == "latest":
+        version = get_plone_versions()[0]
+
+    create_site_base(name)
+
+    # Checkout installer files from the Github
+    installer_folder = os.path.join(folder, "installer")
+
+    with sudo(H=True, i=True, u=unix_user, _with=True):
+        git("clone", "git://github.com/plone/Installers-UnifiedInstaller.git", installer_folder)
+        bash("cd %(installer_folder)s ; git checkout %(version)s" % locals())
+
+    # Create site skeleton
+
+    # Run buildout
+    rebootstrap_site(name, folder, python)
+
+    # Check we got it up an running Plone installation
+    check(name)
+
+
 @plac.annotations( \
     create=("Create an empty Plone site installation under under /srv/plone with matching UNIX user", "flag", "c"),
+    install=("Install a Plone site installation under under /srv/plone", "flag", "i"),
+    ploneversions=("List available Plone versions", "flag", "pv"),
     migrate=("Migrate a Plone site from an existing server", "flag", "m"),
     check=("Check that Plone site configuration under /srv/plone has necessary parts", "flag", "s"),
     restart=("Restart all Plone sites installed on the server", "flag", "r"),
     python=("Which Python interpreter is used for a migrated site", "option", "p", None, None, "/srv/plone/python/python-2.7/bin/python"),
-    name=("Installation name under /srv/plone", "positional", None, None, None, "yourplonesite"),
-    source=("SSH source for the site", "positional", None, None, None, "user@server.com/~folder"),
+    version=("Which Plone version to install. Defaults the latest stable", "option", "v", None, None),
+    name=("Installation name under /srv/plone", "positional", None, None, None, "ploneinstallationname"),
+    source=("SSH source for the site migration", "positional", None, None, None, "user@server.com/~folder"),
     )
-def main(create, migrate, check, restart, python, name=None, source=None):
+def main(create, install, ploneversions, migrate, check, restart, python, version="latest", name=None, source=None):
     """
-    A sysadmin utility to set-up multihosting Plone environment, create Plone sites and migrate existing ones.
+    A sysadmin utility to deploy and maintain multihosting Plone environment.
 
     More info: https://github.com/miohtama/senorita.plonetool
     """
 
+    # XXX: Implement proper plac subcommands here so we do not need this if...else logic structure
     if create:
         create_site_base(name)
+    elif install:
+        install_plone(name, python, version)
     elif migrate:
-        migrate_site(name, source, python)
+        migrate(name, source, python)
     elif check:
-        sanity_check(name)
+        check(name)
+    elif ploneversions:
+        print_plone_versions()
     elif restart:
-        restart_all()
+        restart()
     else:
         sys.exit("Please give an action or -h for help")
 
