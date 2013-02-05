@@ -140,6 +140,22 @@ def has_line(path, line):
     return grep_status == 0
 
 
+def remove_lines(path, old_lines):
+    """
+    Remove a line in a file.
+
+    Note: Operation is not FS atomic safe.
+    """
+    f = open(path, "rt")
+    lines = f.read().split("\n")
+    f.close()
+    for old_line in old_lines:
+        lines.remove(old_line)
+    f = open(path, "wt")
+    f.write("\n".join(lines))
+    f.close()
+
+
 def add_sudoers_option(line):
     """
     Adds a option to /etc/sudoers file in safe manner.
@@ -465,6 +481,8 @@ def copy_site_files(source, target):
 def rebootstrap_site(name, folder, python):
     """
     (Re)run buildout.
+
+    Sudo first before doing this.
     """
 
     from sh import bash
@@ -659,12 +677,12 @@ def print_plone_versions():
         print "   %s" % v
 
 
-def install_plone(name, python, version):
+def install_plone(name, python, version, mode):
     """
     Installs a new Plone site using best practices.
     """
 
-    from sh import git, bash
+    from sh import git, bash, install, touch, rm
 
     folder = get_site_folder(name)
     unix_user = get_unix_user(name)
@@ -673,19 +691,64 @@ def install_plone(name, python, version):
     if version == "latest":
         version = get_plone_versions()[0]
 
-    create_site_base(name)
+    # We run installer as the root and will fix up permissions later
 
     # Checkout installer files from the Github
-    installer_folder = os.path.join(folder, "installer")
+    temp_folder = tempfile.mkdtemp()
+    installer_folder = os.path.join(temp_folder, "plone-unified-installer-%s" % version)
+    plone_home = os.path.join(temp_folder, "plone-fake-home")
 
-    with sudo(H=True, i=True, u=unix_user, _with=True):
+    # create_instance.py wants no folder, we fix up later
+    if os.path.exists(folder):
+        sys.exit("%s exists. Please remove first." % folder)
+
+    print "Getting Plone installer"
+    if not os.path.exists(installer_folder):
         git("clone", "git://github.com/plone/Installers-UnifiedInstaller.git", installer_folder)
-        bash("cd %(installer_folder)s ; git checkout %(version)s" % locals())
 
-    # Create site skeleton
+    print "Checking out Plone installer version from Git %s" % version
+    bash("-c", "cd %(installer_folder)s && git checkout %(version)s" % locals())
+
+    # The following is needed to satisfy create_instance.py Distribute egg look-up
+    # It assumes distribute and zc.buildout eggs in a predefined location.
+    # We spoof these eggs as they are not going to be used in real.
+    cache_folder = os.path.join(plone_home, "buildout-cache", "eggs")
+    install("-d", cache_folder)
+    touch(os.path.join(cache_folder, "zc.buildout-dummy.egg"))
+    touch(os.path.join(cache_folder, "distribute-dummy.egg"))
+
+    python = Command(python)
+    # Run installer
+    python( \
+        os.path.join(installer_folder, "helper_scripts", "create_instance.py"),
+        "--uidir", installer_folder,
+        "--plone_home", plone_home,
+        "--instance_home", folder,
+        "--run_buildout", "0",
+        "--itype", mode,
+        '--install_lxml', "no",
+        _out=_unbuffered_stdout,
+        _err=_unbuffered_stdout
+        ).wait()
+
+    # Delete our Github installer checkout and messy files
+    rm("-rf", temp_folder)
+
+    # Restrict FS access
+    reset_permissions(unix_user, folder)
+
+    create_site_base(name)
 
     # Run buildout
-    rebootstrap_site(name, folder, python)
+    with sudo(H=True, i=True, u=unix_user, _with=True):
+
+        # We mod the buildout to disable shared cache,
+        # as we don't want to share ../buildout-cache/egs with other UNIX users
+        # on this server
+        buildout_base = os.path.join(folder, "base.cfg")
+        remove_lines(buildout_base, ["eggs-directory=../buildout-cache/eggs", "download-cache=../buildout-cache/downloads"])
+
+        rebootstrap_site(name, folder, python)
 
     # Check we got it up an running Plone installation
     check(name)
@@ -699,11 +762,17 @@ def install_plone(name, python, version):
     check=("Check that Plone site configuration under /srv/plone has necessary parts", "flag", "s"),
     restart=("Restart all Plone sites installed on the server", "flag", "r"),
     python=("Which Python interpreter is used for a migrated site", "option", "p", None, None, "/srv/plone/python/python-2.7/bin/python"),
+    mode=("Installation mode: 'standalone' or 'cluster'", "option", "im", None, None, "clusten"),
     version=("Which Plone version to install. Defaults the latest stable", "option", "v", None, None),
     name=("Installation name under /srv/plone", "positional", None, None, None, "ploneinstallationname"),
     source=("SSH source for the site migration", "positional", None, None, None, "user@server.com/~folder"),
     )
-def main(create, install, ploneversions, migrate, check, restart, python, version="latest", name=None, source=None):
+def main(create, install, ploneversions, migrate, check, restart,
+    python="/srv/plone/python/python-2.7/bin/python",
+    version="latest",
+    mode="cluster",
+    name=None,
+    source=None):
     """
     A sysadmin utility to deploy and maintain multihosting Plone environment.
 
@@ -714,7 +783,7 @@ def main(create, install, ploneversions, migrate, check, restart, python, versio
     if create:
         create_site_base(name)
     elif install:
-        install_plone(name, python, version)
+        install_plone(name, python, version, mode)
     elif migrate:
         migrate(name, source, python)
     elif check:

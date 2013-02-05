@@ -86,13 +86,14 @@ Example::
 
     plonetool --ploneversions
 
+Use this command to get available Plone versios for running install (as below).
 
 Install a Plone versions
 -------------------------------------
 
 This command creates a server deployment structure needed to host a Plone site
 (see creating an empty Plone installation below) and installs a named Plone
-version there from Github.
+version there from Github using `Plone unified installer <>´_.
 
 The site is integrated with the server maintenance structure (init.d, log rotate, etc.)
 as described below.
@@ -105,6 +106,17 @@ Or::
 
     plonetool --version 4.2 --install yoursitename
 
+The major difference between running Unified Installer by hand and using ``plonetool`` are
+
+* ``plonetool`` forces you to follow Linux Standard Base server layout. Init and restart scripts support multiple sites on the same server.
+
+* ``UNIX user`` for Plone site maintenance is configured for you automatically
+
+* Sites on the server share the Python interpreter (``/srv/plone/python``)
+
+* ``plonetool`` sets file system permissions in more restrictive manner
+
+In both the cases, buildout skeleton is setup by the same `create_instance.py script <https://github.com/plone/Installers-UnifiedInstaller/blob/master/helper_scripts/create_instance.py>`_.
 
 Create an empty Plone installation
 -------------------------------------
