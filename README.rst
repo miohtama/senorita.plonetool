@@ -25,10 +25,10 @@ running on the same server.
 ``plonetool`` support Ubuntu / Debian servers and it's tested with Ubuntu 12.04 LTS.
 For other Linux distributions please run `unified installer by hand <http://plone.org/download>`_.
 
-Installation
-==============
+Installing plonetool
+=====================
 
-There is only *master* version of the tool and more or lessing rolling releases.
+There exist only  *master* version of the tool and more or lessing rolling releases.
 We suggest install the tool under ``/root`` with virtualenv for easy update.
 
 To get started with ``plonetool`` on a clean server do the following::
@@ -44,6 +44,7 @@ To get started with ``plonetool`` on a clean server do the following::
 
 Now you have command ``plonetool`` in PATH from ``venv/bin/plonetool``.
 You can directly invoke this command as ``/root/senorita.plonetool/venv/bin/plonetool``.
+
 
 Server layout, maintenance and automated tasks
 ============================================================
@@ -166,6 +167,14 @@ Or::
 The command *should be* able to resume errors, especially if running buildout fails
 due to network errors. After the installation ``plonetool`` checks that your site is
 fully functional (starts up properly).
+
+Please note that by default all Plone sites use port (range) starting at 8080.
+Currently ``plonetools install`` does not change this.
+You must manually edit buildout.cfg to allocate free TCP/IP ports on the server,
+so that all sites have unique ports.
+
+Differences to Unified installer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The major difference between running Unified Installer by hand and using ``plonetool`` are
 
