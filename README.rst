@@ -42,12 +42,25 @@ Now you have command ``plonetool`` in PATH from ``venv/bin/plonetool``.
 Server layout
 ===============
 
-The following assumptions are made.
+The following assumptions are made how you manage your Plone deployments.
 
 You can have multiple Plone sites::
 
     /srv/plone/site1
     /srv/plone/site2
+    ...
+
+Each site has an UNIX user with the site installation name as the username.
+These users have password login disabled; use either ``sudo`` or ``ssh`` with
+public key authentication to log in for site maintenance work.
+
+Plone sites use Python interpreters compiled with ``collective.buildout.python``::
+
+    /srv/plone/python/python-2.7/bin/python # Plone 4.x
+    /srv/plone/python/python-2.4/bin/python # Plone 3.x
+
+Teh sites are restarted once in a night by ``/etc/cron.daily/plone-restart``
+in graceful manner (no service interrupts).
 
 Usage
 ======
@@ -129,6 +142,26 @@ It checks
 
 The check cannot be performed against a running site.
 
+Restart all the sites on the server
+--------------------------------------------
+
+This is a useful shortcut for
+
+* Nightly Plone restarts
+
+* Start all Plone sites on the server bootup
+
+Simply run as root::
+
+    plonetool --restart
+
+It will restart
+
+.. note ::
+
+    This command concerns only Zope front end and database processes.
+    You need to handle Apache, Nginx, Varnish and others separately.
+
 Security notes
 ==================
 
@@ -154,6 +187,7 @@ Add it to your buildout if needed::
     # items.
     # For options see http://pypi.python.org/pypi/plone.recipe.unifiedinstaller
     recipe = plone.recipe.unifiedinstaller
+    user = admin:admin  # This is not used anywhere after site creation
 
 We also assume there exist a front end client called *instance* (bin/instance script)
 which we can try to use to start and stop Plone site to see if it works.

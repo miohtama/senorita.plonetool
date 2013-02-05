@@ -12,6 +12,7 @@ import os
 import sys
 import pwd
 import tempfile
+import time
 
 import plac
 
@@ -487,6 +488,8 @@ def migrate_site(name, source, python):
 
     sanity_check(name)
 
+    print "Migrated site %s and it appears to be working" % name
+
 
 def sanity_check(name):
     """
@@ -494,6 +497,7 @@ def sanity_check(name):
     """
     folder = get_site_folder(name)
 
+    # Detect a running Plone site by a ZODB database lock file
     if os.path.exists(os.path.join(folder, "var", "Data.fs.lock")):
         sys.exit("Site at %s must be cleanly stopped for the sanity check" % folder)
 
@@ -504,6 +508,7 @@ def sanity_check(name):
         """
         We detect a succeful Plone launch from stdout debug logs.
         """
+        print line
         if "zope ready" in line.lower():
             process.terminate()
             return True
@@ -514,7 +519,41 @@ def sanity_check(name):
         # See that Plone starts
         print "Testing Plone site startup at %s, max timeout %d seconds" % (folder, MAX_PLONE_STARTUP_TIME)
         plonectl = Command("%s/bin/plonectl" % folder)
-        plonectl.run("instance", "fg", _timeout=MAX_PLONE_STARTUP_TIME).wait()
+        plonectl("fg", "instance", _timeout=MAX_PLONE_STARTUP_TIME).wait()
+
+
+def find_plone_sites(root):
+    """
+    Return all Plone installations under a certain folder.
+
+    We will also detect whether the site installation is
+
+    - Single Zope process instance
+
+    - ZEO front end cluster (multiple front end processes)
+
+    :return: List of (path, installation type, installation name) tuples
+    """
+
+    # XXX: Do not recurse this time, assume /srv/plone layout
+
+    result = []
+
+    for folder in os.listdir(root):
+        path = os.path.join(root, folder)
+
+        # buildout generated bin/client1 launcher script
+        if os.path.exists(os.path.join(path, "bin", "client1")):
+            result.append((path, "zeo", folder,))
+
+        # buildout generated bin/instance launcher script
+        if os.path.exists(os.path.join(path, "bin", "instance")):
+            result.append((path, "zope", folder,))
+
+    if not result:
+        sys.exit("No Plone sites found at %s" % root)
+
+    return result
 
 
 def buildout_sanity_check(name):
@@ -524,15 +563,49 @@ def buildout_sanity_check(name):
     pass
 
 
+def restart_all():
+    """
+    Restart all sites installed on the server.
+
+    If sites are in ZEO front end clusters try to do soft restarts so that there is at least one client up all the time.
+    """
+
+    # List of processes we need to start/stop
+    processes = []
+
+    for folder, zeo_type, name in find_plone_sites("/srv/plone"):
+        if zeo_type == "zeo":
+            # Get all binaries we need to restart
+            for x in range(1, 12):
+                bin_name = os.path.join(folder, "bin", "client%d" % x)
+                if os.path.exists(bin_name):
+                    processes.append(bin_name)
+            processes.append(os.path.join(folder, "bin", "zeoserver"))
+        else:
+            processes.append(os.path.join(folder, "bin", "instance"))
+
+    # Restart processes one by one
+    # so that there should be always
+    for p in processes:
+        print "Restarting process %s" % p
+        cmd = Command(p)
+        cmd("stop")
+        if not p.endswith("zeoserver"):
+            # Don't mess with database server too long
+            time.sleep(20)
+        cmd("start")
+
+
 @plac.annotations( \
     create=("Create an empty Plone site installation under under /srv/plone with matching UNIX user", "flag", "c"),
     migrate=("Migrate a Plone site from an existing server", "flag", "m"),
     check=("Check that Plone site configuration under /srv/plone has necessary parts", "flag", "s"),
+    restart=("Restart all Plone sites installed on the server", "flag", "r"),
     python=("Which Python interpreter is used for a migrated site", "option", "p", None, None, "/srv/plone/python/python-2.7/bin/python"),
     name=("Installation name under /srv/plone", "positional", None, None, None, "yourplonesite"),
     source=("SSH source for the site", "positional", None, None, None, "user@server.com/~folder"),
     )
-def main(create, migrate, check, python, name, source=None):
+def main(create, migrate, check, restart, python, name=None, source=None):
     """
     A sysadmin utility to set-up multihosting Plone environment, create Plone sites and migrate existing ones.
 
@@ -545,6 +618,8 @@ def main(create, migrate, check, python, name, source=None):
         migrate_site(name, source, python)
     elif check:
         sanity_check(name)
+    elif restart:
+        restart_all()
     else:
         sys.exit("Please give an action")
 
@@ -560,4 +635,3 @@ def entry_point():
 
 if __name__ == "__main__":
     entry_point()
-
