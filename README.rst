@@ -39,6 +39,15 @@ Example::
 
 Now you have command ``plonetool`` in PATH from ``venv/bin/plonetool``.
 
+Server layout
+===============
+
+The following assumptions are made.
+
+You can have multiple Plone sites::
+
+    /srv/plone/site1
+    /srv/plone/site2
 
 Usage
 ======
@@ -105,6 +114,21 @@ You can also migrate Plone 3.3 site using automatically installde ``/srv/plone/p
 
 `More info about copying Plone sites <http://plone.org/documentation/kb/copying-a-plone-site>`_
 
+Check that Plone site works
+--------------------------------------------
+
+You can use script to check whether an installation under ``/srv/plone`` works::
+
+     plonetool --check yoursitename
+
+It checks
+
+* plonectl command provided
+
+* ``bin/plonectl instance fg`` starts the site
+
+The check cannot be performed against a running site.
+
 Security notes
 ==================
 
@@ -115,25 +139,37 @@ host fingerprints before using the script.
 Requirements for Plone site to co-operate
 ========================================================
 
-Your Plone buildout installation must come with functionality ``plonectl`` command.
+Your Plone buildout installation must come with functionality ``plonectl`` command
+provided by `plone.recipe.unifiedinstaller buildout recipe <http://pypi.python.org/pypi/plone.recipe.unifiedinstaller/>`_.
 
 Add it to your buildout if needed::
 
-    xxx
+    parts =
+        ...
+        unifiedinstaller
 
-Pass
+
+    [unifiedinstaller]
+    # This recipe installs the plonectl script and a few other convenience
+    # items.
+    # For options see http://pypi.python.org/pypi/plone.recipe.unifiedinstaller
+    recipe = plone.recipe.unifiedinstaller
+
+We also assume there exist a front end client called *instance* (bin/instance script)
+which we can try to use to start and stop Plone site to see if it works.
 
 Other
 =============
 
 The script heavily uses `Python sh package <http://amoffat.github.com/sh/>`_.
 
-* http://docs.saltstack.org/
+If you need more advanced Python deployment recipes check
+`Salt Stack <http://docs.saltstack.org/>`_.
 
 Development
 ==============
 
-Keep your script automatically synced on the server when editing files locally::
+Keep your senorita.plonetool is automatically synced on the server when editing files locally::
 
     . venv/bin/activate
     pip install watchdog

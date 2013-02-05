@@ -109,6 +109,10 @@ eggs-directory = eggs
 prefix = /opt/local
 """
 
+# How fast Plone site bin/instance must come up before
+# we assume it's defunct
+MAX_PLONE_STARTUP_TIME = 300
+
 
 def generate_password():
     """
@@ -141,6 +145,18 @@ def get_unix_user_home(username):
     """
     """
     return "/home/%s" % username
+
+
+_unbuffered_stdout = os.fdopen(sys.stdout.fileno(), "wb", 0)
+
+
+def process_unbuffered_output(char, stdin):
+    """
+    Echo rsync progress in ANSI compatible manner.
+
+    Helper method for sh.
+    """
+    _unbuffered_stdout.write(char)
 
 
 def add_sudoers_option(line):
@@ -193,13 +209,11 @@ def ssh_handshake(target):
 
     # http://amoffat.github.com/sh/tutorials/2-interacting_with_processes.html
 
-    stdout = os.fdopen(sys.stdout.fileno(), "wb", 0)
-
     def callback(char, stdin):
         """
         Handle SSH input
         """
-        stdout.write(char.encode())
+        _unbuffered_stdout.write(char.encode())
 
         # Ugh http://stackoverflow.com/a/4852073/315168
         callback.aggregated += char
@@ -304,6 +318,11 @@ def create_base():
         if os.path.exists("/etc/cron.d"):
             print "(Re)setting all sites nightly restart cron job"
             echo(CRON_TEMPLATE, _out=CRON_JOB)
+
+        # Create buildout shared cache folder if some buildouts use them
+        if not os.path.exists("/srv/plone/buildout-cache/eggs"):
+            install("-d", "/srv/plone/buildout-cache/eggs")
+            install("-d", "/srv/plone/buildout-cache/downloads")
 
     create_python_env()
 
@@ -410,18 +429,13 @@ def copy_site_files(source, target):
     # Make sure we can SSH into to the box without interaction
     ssh_handshake(source)
 
-    stdout = os.fdopen(sys.stdout.fileno(), "wb", 0)
-
-    def process_output(char, stdin):
-        """
-        Echo rsync progress in ANSI compatible manner.
-        """
-        stdout.write(char)
-
-    print "Copying site files from: %s" % source
+    print "Syncing site files from old site %s" % source
     from sh import rsync
     # XXX: --progress here is too verbose, rsync having multiple file transfer indicator?
-    rsync("-a", "--compress-level=9", "--inplace", "--exclude", "*.log", "--exclude", "eggs", "--exclude", "downloads", "--exclude", "parts", "%s/*" % source, target, _out=process_output, _err=process_output, _out_bufsize=0).wait()
+    rsync("-a", "--compress-level=9", "--inplace", "--exclude", "*.lock", "--exclude", "*.log", "--exclude", "eggs", "--exclude", "downloads", "--exclude", "parts", "%s/*" % source, target,
+        _out=_unbuffered_stdout,
+        _err=_unbuffered_stdout,
+        _out_bufsize=0).wait()
 
     # Rercreate regeneratable folders
     install("-d", "%s/eggs" % target)
@@ -431,12 +445,20 @@ def copy_site_files(source, target):
 
 def rebootstrap_site(name, folder, python):
     """
-    Re-run buildout
+    (Re)run buildout.
     """
-    cd(folder)
-    python = Command(python)
-    python("bootstrap.py")
-    Command("%s/bin/buildout")()
+
+    from sh import bash
+    # Bootstrap + buildout is so dummy with its cwd which we cannot pass through sudo
+    # we do a trick here by running the command through bash
+    bash("-c", "cd %s && %s bootstrap.py" % (folder, python))
+    print "Running buildout on %s" % folder
+
+    # We really want to capture all output here since buildout is a bitch
+    bash("-c", "cd %s && bin/buildout" % folder,
+        _out_bufsize=0,
+        _out=_unbuffered_stdout,
+        _err=_unbuffered_stdout).wait()
 
 
 def migrate_site(name, source, python):
@@ -463,15 +485,54 @@ def migrate_site(name, source, python):
     # Make sure all file permissions are sane after migration
     reset_permissions(unix_user, folder)
 
+    sanity_check(name)
+
+
+def sanity_check(name):
+    """
+    Check that the site is ok for this script and related sysdmin tasks.
+    """
+    folder = get_site_folder(name)
+
+    if os.path.exists(os.path.join(folder, "var", "Data.fs.lock")):
+        sys.exit("Site at %s must be cleanly stopped for the sanity check" % folder)
+
+    if not os.path.exists(os.path.join(folder, "bin", "plonectl")):
+        sys.exit("plonectl command missing for %s" % folder)
+
+    def zope_ready_checker(line, stdin, process):
+        """
+        We detect a succeful Plone launch from stdout debug logs.
+        """
+        if "zope ready" in line.lower():
+            process.terminate()
+            return True
+
+    unix_user = get_unix_user(name)
+
+    with sudo(H=True, i=True, u=unix_user, _with=True):
+        # See that Plone starts
+        print "Testing Plone site startup at %s, max timeout %d seconds" % (folder, MAX_PLONE_STARTUP_TIME)
+        plonectl = Command("%s/bin/plonectl" % folder)
+        plonectl.run("instance", "fg", _timeout=MAX_PLONE_STARTUP_TIME).wait()
+
+
+def buildout_sanity_check(name):
+    """
+    Checks that a buildout work.
+    """
+    pass
+
 
 @plac.annotations( \
     create=("Create an empty Plone site installation under under /srv/plone with matching UNIX user", "flag", "c"),
     migrate=("Migrate a Plone site from an existing server", "flag", "m"),
+    check=("Check that Plone site configuration under /srv/plone has necessary parts", "flag", "s"),
     python=("Which Python interpreter is used for a migrated site", "option", "p", None, None, "/srv/plone/python/python-2.7/bin/python"),
-    name=("Installation name", "positional", None, None, None, "yourplonesite"),
+    name=("Installation name under /srv/plone", "positional", None, None, None, "yourplonesite"),
     source=("SSH source for the site", "positional", None, None, None, "user@server.com/~folder"),
     )
-def main(create, migrate, python, name, source=None):
+def main(create, migrate, check, python, name, source=None):
     """
     A sysadmin utility to set-up multihosting Plone environment, create Plone sites and migrate existing ones.
 
@@ -482,6 +543,8 @@ def main(create, migrate, python, name, source=None):
         create_site_base(name)
     elif migrate:
         migrate_site(name, source, python)
+    elif check:
+        sanity_check(name)
     else:
         sys.exit("Please give an action")
 
@@ -497,5 +560,4 @@ def entry_point():
 
 if __name__ == "__main__":
     entry_point()
-
 
