@@ -150,7 +150,8 @@ def remove_lines(path, old_lines):
     lines = f.read().split("\n")
     f.close()
     for old_line in old_lines:
-        lines.remove(old_line)
+        if old_line in lines:
+            lines.remove(old_line)
     f = open(path, "wt")
     f.write("\n".join(lines))
     f.close()
@@ -535,7 +536,7 @@ def check(name):
 
     user = get_unix_user(name)
 
-    if not os.path.exist(folder):
+    if not os.path.exists(folder):
         sys.exit("Folder does not exist: %s" % folder)
 
     if not has_user(user):
@@ -559,11 +560,24 @@ def check(name):
 
     unix_user = get_unix_user(name)
 
+    print "Testing Plone site startup at %s, max timeout %d seconds" % (folder, MAX_PLONE_STARTUP_TIME)
+
+    # Do Zope standalone check
     with sudo(H=True, i=True, u=unix_user, _with=True):
-        # See that Plone starts
-        print "Testing Plone site startup at %s, max timeout %d seconds" % (folder, MAX_PLONE_STARTUP_TIME)
-        plonectl = Command("%s/bin/plonectl" % folder)
-        plonectl("fg", "instance", _timeout=MAX_PLONE_STARTUP_TIME).wait()
+
+        # Do ZEO check
+        if os.path.exists(os.path.join(folder, "bin", "client1")):
+
+            # See that Plone starts
+            plonectl = Command("%s/bin/plonectl" % folder)
+            plonectl("start", "zeoserver")
+            plonectl("fg", "client1", _timeout=MAX_PLONE_STARTUP_TIME).wait()
+            plonectl("stop", "zeoserver")
+
+        else:
+            # See that Plone starts
+            plonectl = Command("%s/bin/plonectl" % folder)
+            plonectl("fg", "instance", _timeout=MAX_PLONE_STARTUP_TIME).wait()
 
 
 def find_plone_sites(root="/srv/plone"):
@@ -687,59 +701,62 @@ def install_plone(name, python, version, mode):
     folder = get_site_folder(name)
     unix_user = get_unix_user(name)
 
-    # Resolve the latest version
-    if version == "latest":
-        version = get_plone_versions()[0]
+    if os.path.exists(folder) and not os.path.exists(os.path.join(folder, "buildout.cfg")):
+        sys.exit("%s exists, but seems to lack buildout.cfg. Please remove first." % folder)
 
-    # We run installer as the root and will fix up permissions later
+    # Create buildout structure using create_instance.py
+    if not os.path.exists(os.path.join(folder, "buildout.cfg")):
 
-    # Checkout installer files from the Github
-    temp_folder = tempfile.mkdtemp()
-    installer_folder = os.path.join(temp_folder, "plone-unified-installer-%s" % version)
-    plone_home = os.path.join(temp_folder, "plone-fake-home")
+        # Resolve the latest version
+        if version == "latest":
+            version = get_plone_versions()[0]
 
-    # create_instance.py wants no folder, we fix up later
-    if os.path.exists(folder):
-        sys.exit("%s exists. Please remove first." % folder)
+        # Checkout installer files from the Github
+        temp_folder = tempfile.mkdtemp()
+        installer_folder = os.path.join(temp_folder, "plone-unified-installer-%s" % version)
+        plone_home = os.path.join(temp_folder, "plone-fake-home")
 
-    print "Getting Plone installer"
-    if not os.path.exists(installer_folder):
-        git("clone", "git://github.com/plone/Installers-UnifiedInstaller.git", installer_folder)
+        print "Getting Plone installer"
+        if not os.path.exists(installer_folder):
+            git("clone", "git://github.com/plone/Installers-UnifiedInstaller.git", installer_folder)
 
-    print "Checking out Plone installer version from Git %s" % version
-    bash("-c", "cd %(installer_folder)s && git checkout %(version)s" % locals())
+        print "Checking out Plone installer version from Git %s" % version
+        bash("-c", "cd %(installer_folder)s && git checkout %(version)s" % locals())
 
-    # The following is needed to satisfy create_instance.py Distribute egg look-up
-    # It assumes distribute and zc.buildout eggs in a predefined location.
-    # We spoof these eggs as they are not going to be used in real.
-    cache_folder = os.path.join(plone_home, "buildout-cache", "eggs")
-    install("-d", cache_folder)
-    touch(os.path.join(cache_folder, "zc.buildout-dummy.egg"))
-    touch(os.path.join(cache_folder, "distribute-dummy.egg"))
+        # The following is needed to satisfy create_instance.py Distribute egg look-up
+        # It assumes distribute and zc.buildout eggs in a predefined location.
+        # We spoof these eggs as they are not going to be used in real.
+        cache_folder = os.path.join(plone_home, "buildout-cache", "eggs")
+        install("-d", cache_folder)
+        touch(os.path.join(cache_folder, "zc.buildout-dummy.egg"))
+        touch(os.path.join(cache_folder, "distribute-dummy.egg"))
 
-    python = Command(python)
-    # Run installer
-    python( \
-        os.path.join(installer_folder, "helper_scripts", "create_instance.py"),
-        "--uidir", installer_folder,
-        "--plone_home", plone_home,
-        "--instance_home", folder,
-        "--run_buildout", "0",
-        "--itype", mode,
-        '--install_lxml', "no",
-        _out=_unbuffered_stdout,
-        _err=_unbuffered_stdout
-        ).wait()
+        python = Command(python)
+        # Run installer
+        python( \
+            os.path.join(installer_folder, "helper_scripts", "create_instance.py"),
+            "--uidir", installer_folder,
+            "--plone_home", plone_home,
+            "--instance_home", folder,
+            "--daemon_user", unix_user,
+            "--buildout_user", unix_user,
+            "--run_buildout", "0",
+            "--itype", mode,
+            '--install_lxml', "no",
+            _out=_unbuffered_stdout,
+            _err=_unbuffered_stdout
+            ).wait()
 
-    # Delete our Github installer checkout and messy files
-    rm("-rf", temp_folder)
+        # Delete our Github installer checkout and messy files
+        rm("-rf", temp_folder)
 
     # Restrict FS access
     reset_permissions(unix_user, folder)
 
+    # Integrate with LSB
     create_site_base(name)
 
-    # Run buildout
+    # Run buildout... we should be able to resume from errors
     with sudo(H=True, i=True, u=unix_user, _with=True):
 
         # We mod the buildout to disable shared cache,
@@ -770,7 +787,7 @@ def install_plone(name, python, version, mode):
 def main(create, install, ploneversions, migrate, check, restart,
     python="/srv/plone/python/python-2.7/bin/python",
     version="latest",
-    mode="cluster",
+    mode="standalone",
     name=None,
     source=None):
     """

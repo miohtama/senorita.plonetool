@@ -23,6 +23,7 @@ running on the same server.
 * Some basic automated site maintenance is put in the place: nighly restart cron job, automatic site database packaging, site start up when the server goes up, log rotate
 
 ``plonetool`` support Ubuntu / Debian servers and it's tested with Ubuntu 12.04 LTS.
+For other Linux distributions please run `unified installer by hand <http://plone.org/download>`_.
 
 Installation
 ==============
@@ -44,28 +45,85 @@ To get started with ``plonetool`` on a clean server do the following::
 Now you have command ``plonetool`` in PATH from ``venv/bin/plonetool``.
 You can directly invoke this command as ``/root/senorita.plonetool/venv/bin/plonetool``.
 
-Server layout
-===============
+Server layout, maintenance and automated tasks
+============================================================
+
+Folder layout
+----------------------
 
 The following assumptions are made how you manage your Plone deployments.
 
-You can have multiple Plone sites::
+You can have multiple Plone sites as described by LSB services run on the server::
 
     /srv/plone/site1
+    /srv/plone/site1/buildout.cfg
+    /srv/plone/site1/var
+    /srv/plone/site1/src
+    /srv/plone/site1/eggs
+    ...
     /srv/plone/site2
     ...
+    /srv/plone/python  # Shared Python interpreters installation
 
-Each site has an UNIX user with the site installation name as the username.
+UNIX users
+----------------------
+
+Each site has an UNIX user with the site installation name as the username (e.g. ``site1``).
 These users have password login disabled; use either ``sudo`` or ``ssh`` with
-public key authentication to log in for site maintenance work.
+`public key authentication <http://opensourcehacker.com/2012/10/24/ssh-key-and-passwordless-login-basics-for-developers/>`_ to log in for the site maintenance work.
+
+Setting up SSH keys
+----------------------
+
+The suggestion is to add your passphrase protected public SSH key to the Plone UNIX user for login::
+
+    sudo -i
+    # Make sure site1 user has ssh configuration folder
+    install -d /home/site1/.ssh
+    # Copy-paste your public SSH key line from your local ~/.ssh/id_rsa.pub file
+    echo "Long line goes here XXX" >> /home/site1/authorized_keys
+    chown -R site1:site1 /home/site1/  # Make site1 owner of the file
+    chmod -R o-rwx /home/site1/.ssh  # Restrict SSH key permissions
+
+Now you should be log in as the ``site1`` user and do the sysadmin tasks::
+
+    ssh site1@yourserver
+    cd /srv/plone/site1
+    bin/buildout
+    # ... etc ...
+
+Python interpreters
+----------------------
 
 Plone sites use Python interpreters compiled with ``collective.buildout.python``::
 
     /srv/plone/python/python-2.7/bin/python # Plone 4.x
     /srv/plone/python/python-2.4/bin/python # Plone 3.x
 
-Teh sites are restarted once in a night by ``/etc/cron.daily/plone-restart``
-in graceful manner (no service interrupts).
+LSB init scripts
+----------------------
+
+The sites have an init.d script created as::
+
+    /etc/init.d/site1
+    /etc/init.d/site2
+    ...
+
+Nightly restarts
+----------------------
+
+All sites on the server are set up to be `restarted once in a night <http://developer.plone.org/hosting/restarts.html#nightly-restart>`_ by ``/etc/cron.daily/plone-restart``script.
+If you use clustered install this happens in graceful manner, without affecting the site users (too much).
+
+Log rotate
+----------------------
+
+The site `log rotation is handled internally by the buildout <http://developer.plone.org/reference_manuals/active/deployment/logs.html>`_.
+
+Database package
+----------------------
+
+TODO: Pack the site database automatically.
 
 Usage
 ======
@@ -88,23 +146,26 @@ Example::
 
 Use this command to get available Plone versios for running install (as below).
 
-Install a Plone versions
+Install a Plone site
 -------------------------------------
 
-This command creates a server deployment structure needed to host a Plone site
-(see creating an empty Plone installation below) and installs a named Plone
-version there from Github using `Plone unified installer <>´_.
+This command downloads, installs and set-ups Plone site for multisite hosting on the server.
+Plone versions are available on Github using `Plone unified installer <https://github.com/plone/Installers-UnifiedInstaller/>´_.
 
-The site is integrated with the server maintenance structure (init.d, log rotate, etc.)
-as described below.
+The site is integrated with the server maintenance structure
+as described in *Create an empty Plone installation*..
 
-To install the latest version::
+To install the latest Plone version as *yoursitename*::
 
     plonetool --install yoursitename #
 
 Or::
 
     plonetool --version 4.2 --install yoursitename
+
+The command *should be* able to resume errors, especially if running buildout fails
+due to network errors. After the installation ``plonetool`` checks that your site is
+fully functional (starts up properly).
 
 The major difference between running Unified Installer by hand and using ``plonetool`` are
 
@@ -196,7 +257,7 @@ It checks
 
 The check cannot be performed against a running site.
 
-Restart all the sites on the server
+Restart all Plone sites on the server
 --------------------------------------------
 
 This is a useful shortcut for
@@ -209,7 +270,7 @@ Simply run as root::
 
     plonetool --restart
 
-It will restart
+It will restart all Plone sites found in /srv/plone.
 
 .. note ::
 
@@ -234,12 +295,8 @@ but security wise this is bad idea. Instead, only on local development machines 
     extends-cache = /Users/moo/code/buildout-cache/extends
 
 
-Requirements for Plone site to co-operate
-========================================================
-
-Currently the script does not allow other file system layouts besides /srv/plone, but supporting them is easy to add.
-
-Currently only ``/srv/plone/python`` Python set-ups are supported.
+Requirements for Plone configurations to co-operate with plonetool
+===================================================================
 
 Your Plone buildout installation must come with functionality ``plonectl`` command
 provided by `plone.recipe.unifiedinstaller buildout recipe <http://pypi.python.org/pypi/plone.recipe.unifiedinstaller/>`_.
@@ -258,8 +315,9 @@ Add it to your buildout if needed::
     recipe = plone.recipe.unifiedinstaller
     user = admin:admin  # This is not used anywhere after site creation
 
-We also assume there exist a front end client called *instance* (bin/instance script)
-which we can try to use to start and stop Plone site to see if it works.
+Currently the script does not allow other file system layouts besides /srv/plone, but supporting them is easy to add.
+
+Currently only ``/srv/plone/python`` Python set-ups are supported.
 
 Other
 =============
