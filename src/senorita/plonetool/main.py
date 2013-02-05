@@ -621,7 +621,7 @@ def main(create, migrate, check, restart, python, name=None, source=None):
     elif restart:
         restart_all()
     else:
-        sys.exit("Please give an action")
+        sys.exit("Please give an action or -h for help")
 
 
 def entry_point():

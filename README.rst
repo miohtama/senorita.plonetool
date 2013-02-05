@@ -3,32 +3,36 @@
 Introduction
 ============
 
-``plonetool`` command which allows you to easily create and migrate sites in ``/srv/plone``.
+``senorita.plonetool`` Python package providing you ``plonetool`` command which allows you to easily create, maintain, diagnose and migrate Plone sites with Plone and Linux best practices. The script is the culmination of headache and alcohol abuse since 2004.
 
-Support Ubuntu / Debian servers. Tested with Ubuntu 12.04 LTS.
+This tool is designed for a multisite hosting situations where you have several Plone sites
+running on the same server.
 
-This tool is designed for a multisite hosting where
+* The required packages and other global server setup is automatically
+  done you by ``plonetool``. You can start with a fresh server installation.
 
-* One server hosts multiple Plone sites in ``/srv/plone`` folder, as per guidelines
+* The server hosts multiple Plone sites in ``/srv/plone`` folder, as per guidelines
   `Linux Filesystem Hierarchy <http://www.tldp.org/LDP/Linux-Filesystem-Hierarchy/html/srv.html>`_.
-  Currently the script does not allow other file system layouts to be used, but supporting them
-  is easy.
 
-* These sites share the same Python installation which is created by `collective.buildout.python <https://github.com/collective/buildout.python>`_. Currently other kind of Python set-ups are not supported.
+* The Plone sites share a Python installation which is created by `collective.buildout.python <https://github.com/collective/buildout.python>`_ recipe (Python 2.7, Python 2.4).
 
-* Some additional security barries is put in the place by setting one UNIX user
-  per site
+* For additional security, every Plone site installation is only accessible by its own UNIX user account with password disabled.
+
+* The script can create fresh Plone site installations or migrate (copy) one from the existing server over SSH.
 
 * Some basic automated site maintenance is put in the place: nighly restart cron job, automatic site database packaging, site start up when the server goes up, log rotate
 
-The script assumes a clean server installation, so it will do everything for you
-starting from installing the system packages.
+``plonetool`` support Ubuntu / Debian servers and it's tested with Ubuntu 12.04 LTS.
 
 Installation
 ==============
 
-Example::
+There is only *master* version of the tool and more or lessing rolling releases.
+We suggest install the tool under ``/root`` with virtualenv for easy update.
 
+To get started with ``plonetool`` on a clean server do the following::
+
+    sudo -i # root me babe!
     apt-get install curl
     git clone git://github.com/miohtama/senorita.plonetool.git
     cd senorita.plonetool
@@ -38,6 +42,7 @@ Example::
     python setup.py develop
 
 Now you have command ``plonetool`` in PATH from ``venv/bin/plonetool``.
+You can directly invoke this command as ``/root/senorita.plonetool/venv/bin/plonetool``.
 
 Server layout
 ===============
@@ -67,6 +72,10 @@ Usage
 
 Because this script will ``sudo`` to different UNIX users assuming no password prompt the only sensible
 way to run this script is as a root.
+
+You can execute Plone tool directly from its installation location::
+
+    /root/senorita.plonetool/venv/bin/plonetool
 
 Create a Plone site
 ----------------------
@@ -165,12 +174,16 @@ It will restart
 Security notes
 ==================
 
-This script plainly accepts any SSH hosts you give it without allowing
+When migrating sites, ``plonetool`` plainly accepts any SSH hosts you give it without allowing
 you manually to check ``known_hosts`` fingerprints. Please check all
 host fingerprints before using the script.
 
 Requirements for Plone site to co-operate
 ========================================================
+
+Currently the script does not allow other file system layouts besides /srv/plone, but supporting them is easy to add.
+
+Currently only ``/srv/plone/python`` Python set-ups are supported.
 
 Your Plone buildout installation must come with functionality ``plonectl`` command
 provided by `plone.recipe.unifiedinstaller buildout recipe <http://pypi.python.org/pypi/plone.recipe.unifiedinstaller/>`_.
@@ -203,9 +216,13 @@ If you need more advanced Python deployment recipes check
 Development
 ==============
 
-Keep your senorita.plonetool is automatically synced on the server when editing files locally::
+To ``senorita.plonetool`` is automatically synced on the server when editing files locally::
 
     . venv/bin/activate
     pip install watchdog
     watchmedo shell-command --patterns="*.py" --recursive --command='rsync -av --exclude=venv --exclude=.git . yourserver:~/senorita.plonetool'
 
+Author
+=======
+
+`Mikko Ohtamaa <http://opensourcehacker.com>`_ (`Twitter <http://twitter.com/moo9000>`_, `Facebook <https://www.facebook.com/pages/Open-Source-Hacker/181710458567630>`_)
