@@ -232,6 +232,8 @@ def ssh_handshake(target):
 
     parts = target.split(":")
     host = parts[0]
+    # Run a dummy ssh command, so we see we get public key auth working
+    # If the server prompts for known_hosts update auto-yes it
     p = ssh("-o", "PreferredAuthentications=publickey", host, "touch ~/plonetool.handshake", _out=callback, _out_bufsize=0, _tty_in=True)
     p.wait()
 

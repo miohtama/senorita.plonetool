@@ -178,6 +178,17 @@ When migrating sites, ``plonetool`` plainly accepts any SSH hosts you give it wi
 you manually to check ``known_hosts`` fingerprints. Please check all
 host fingerprints before using the script.
 
+The script supports shared Python eggs folder under ``/srv/plone/buildout-cache``
+but security wise this is bad idea. Instead, only on local development machines I recommend adding a
+`buildout global configuration file <http://plone.org/documentation/manual/developer-manual/managing-projects-with-buildout/creating-a-buildout-defaults-file>`_  ~/.buildout/default.cfg::
+
+    # OSX example
+    [buildout]
+    eggs-directory = /Users/moo/code/buildout-cache/eggs
+    download-cache = /Users/moo/code/buildout-cache/downloads
+    extends-cache = /Users/moo/code/buildout-cache/extends
+
+
 Requirements for Plone site to co-operate
 ========================================================
 
