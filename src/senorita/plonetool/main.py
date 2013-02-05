@@ -11,6 +11,7 @@
 import os
 import sys
 import pwd
+import tempfile
 
 import plac
 
@@ -23,6 +24,7 @@ from sh import cd, chown, Command
 # http://plone.org/documentation/manual/installing-plone/installing-on-linux-unix-bsd/debian-libraries
 # https://github.com/miohtama/ztanesh/
 PACKAGES = [
+"acl",
 "supervisor",
 "git-core",
 "highlight",
@@ -60,6 +62,21 @@ RESTART_ALL_TEMPLATE = """#!/bin/sh
 # Restart all the sites on a server
 
 
+"""
+
+#: Generated shell script template to use visudo
+#: to add options to /etc/sudoers
+ADD_LINE_VISUDO = """#!/bin/bash
+
+set -e
+
+if [ ! -z "$1" ]; then
+        echo "" >> $1
+        echo "{line}" >> $1
+else
+        export EDITOR=$0
+        visudo
+fi
 """
 
 # buildout.cfg override for buildout.python recipe
@@ -126,6 +143,38 @@ def get_unix_user_home(username):
     return "/home/%s" % username
 
 
+def add_sudoers_option(line):
+    """
+    Adds a option to /etc/sudoers file in safe manner.
+
+    Generate a bash script which will be invoke itself as visudo EDITOR.
+
+    http://stackoverflow.com/a/3706774/315168
+    """
+
+    from sh import grep, chmod, rm
+
+    with sudo:
+
+        # Check if we have the option already in /etc/sudoers
+        # http://man.cx/grep#heading14 -> 1 == no lines
+        grep_status = grep('%s' % line, "/etc/sudoers", _ok_code=[0, 1]).exit_code
+
+        if grep_status == 1:
+
+            print "Updating /etc/sudoers to enable %s" % line
+
+            tmp = tempfile.NamedTemporaryFile(mode="wt", delete=False)
+            # Generate visudo EDITOR which adds the line
+            # https://www.ibm.com/developerworks/mydeveloperworks/blogs/brian/entry/edit_sudoers_file_from_a_script4?lang=en
+            script = ADD_LINE_VISUDO.format(line=line)
+            tmp.write(script)
+            tmp.close()
+            chmod("u+x", tmp.name)
+            Command(tmp.name)()
+            rm(tmp.name)
+
+
 def require_ssh_agent():
     """
     Make sure that we use SSH keys from the SSH agent.
@@ -155,8 +204,6 @@ def ssh_handshake(target):
         # Ugh http://stackoverflow.com/a/4852073/315168
         callback.aggregated += char
 
-        print callback.aggregated
-
         if "(yes/no)? " in callback.aggregated:
             print "Done"
             stdin.put("yes\n")
@@ -172,6 +219,28 @@ def ssh_handshake(target):
     host = parts[0]
     p = ssh("-o", "PreferredAuthentications=publickey", host, "touch ~/plonetool.handshake", _out=callback, _out_bufsize=0, _tty_in=True)
     p.wait()
+
+
+def allow_ssh_agent_thru_sudo():
+    """
+    Make it possible to use SSH agent forwarding with sudo on the server.
+    """
+    # http://serverfault.com/a/118932/74975
+    add_sudoers_option("Defaults    env_keep+=SSH_AUTH_SOCK")
+
+
+def allow_non_root_user_to_share_ssh_agent_forwarding(username):
+    """
+    When you need to pass SSH agent to non-root user over sudo.
+    """
+
+    if not "SSH_AUTH_SOCK" in os.environ:
+        raise RuntimeError("SSH agent forwarding must be enabled")
+
+    # http://serverfault.com/a/442099/74975
+    from sh import setfacl
+    setfacl("-m", "u:%s:rw" % username, os.environ["SSH_AUTH_SOCK"])
+    setfacl("-m", "u:%s:x" % username, os.path.dirname(os.environ["SSH_AUTH_SOCK"]))
 
 
 def create_python_env():
@@ -341,15 +410,18 @@ def copy_site_files(source, target):
     # Make sure we can SSH into to the box without interaction
     ssh_handshake(source)
 
-    def process_output(line):
+    stdout = os.fdopen(sys.stdout.fileno(), "wb", 0)
+
+    def process_output(char, stdin):
         """
-        Echo rsync progress
+        Echo rsync progress in ANSI compatible manner.
         """
-        print line
+        stdout.write(char)
 
     print "Copying site files from: %s" % source
     from sh import rsync
-    rsync("-a", "-v", "--compress-level=9", "--inplace", "--progress", "--exclude", "*.log", "--exclude", "eggs", "--exclude", "downloads", "--exclude", "parts", "%s/*" % source, target, _out=process_output, _err=process_output).wait()
+    # XXX: --progress here is too verbose, rsync having multiple file transfer indicator?
+    rsync("-a", "--compress-level=9", "--inplace", "--exclude", "*.log", "--exclude", "eggs", "--exclude", "downloads", "--exclude", "parts", "%s/*" % source, target, _out=process_output, _err=process_output, _out_bufsize=0).wait()
 
     # Rercreate regeneratable folders
     install("-d", "%s/eggs" % target)
@@ -374,15 +446,19 @@ def migrate_site(name, source, python):
 
     require_ssh_agent()
 
+    allow_ssh_agent_thru_sudo()
+
     create_site_base(name)
 
     folder = get_site_folder(name)
     unix_user = get_unix_user(name)
 
-    with sudo(H=True, u=unix_user, _with=True):
+    allow_non_root_user_to_share_ssh_agent_forwarding(unix_user)
+
+    with sudo(H=True, i=True, u=unix_user, _with=True):
         folder = get_site_folder(name)
         copy_site_files(source, folder)
-        #rebootstrap_site(name, folder, python)
+        rebootstrap_site(name, folder, python)
 
     # Make sure all file permissions are sane after migration
     reset_permissions(unix_user, folder)

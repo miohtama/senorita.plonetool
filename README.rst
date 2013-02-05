@@ -128,6 +128,8 @@ Other
 
 The script heavily uses `Python sh package <http://amoffat.github.com/sh/>`_.
 
+* http://docs.saltstack.org/
+
 Development
 ==============
 
