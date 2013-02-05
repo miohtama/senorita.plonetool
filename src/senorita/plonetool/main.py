@@ -425,9 +425,6 @@ def create_site_initd_script(name):
         updaterc(name, "defaults")
 
 
-@plac.annotations(
-    name=("Installation name under /srv/plone", "positional", None, None, None, "yourplonesite"),
-    )
 def create_site_base(name):
     """
     Create an empty Plone site installation and corresponding UNIX user.
@@ -523,14 +520,16 @@ def migrate(name, source, python):
     # Make sure all file permissions are sane after migration
     reset_permissions(unix_user, folder)
 
-    check(name)
+    check_startup(name)
 
     print "Migrated site %s and it appears to be working" % name
 
 
-def check(name):
+def check_startup(name):
     """
     Check that the site is ok for this script and related sysdmin tasks.
+
+    :param name: Plone installation name
     """
     folder = get_site_folder(name)
 
@@ -553,14 +552,16 @@ def check(name):
         """
         We detect a succeful Plone launch from stdout debug logs.
         """
-        print line
+        #_unbuffered_stdout.write(line)
+        #_unbuffered_stdout.write("\n")
         if "zope ready" in line.lower():
+            zope_ready_checker.success = True
             process.terminate()
             return True
 
-    unix_user = get_unix_user(name)
+    zope_ready_checker.success = False
 
-    print "Testing Plone site startup at %s, max timeout %d seconds" % (folder, MAX_PLONE_STARTUP_TIME)
+    unix_user = get_unix_user(name)
 
     # Do Zope standalone check
     with sudo(H=True, i=True, u=unix_user, _with=True):
@@ -568,16 +569,36 @@ def check(name):
         # Do ZEO check
         if os.path.exists(os.path.join(folder, "bin", "client1")):
 
+            print "Testing Plone site cluster mode startup at %s, max timeout %d seconds" % (folder, MAX_PLONE_STARTUP_TIME)
             # See that Plone starts
             plonectl = Command("%s/bin/plonectl" % folder)
             plonectl("start", "zeoserver")
-            plonectl("fg", "client1", _timeout=MAX_PLONE_STARTUP_TIME).wait()
+            plonectl("fg", "client1",
+                _out=zope_ready_checker,
+                _err=zope_ready_checker,
+                _timeout=MAX_PLONE_STARTUP_TIME,
+                _ok_code=[0, 143],  # Allow terminate signal
+                ).wait()
             plonectl("stop", "zeoserver")
 
         else:
+
+            print "Testing Plone site standlone mode at %s, max timeout %d seconds" % (folder, MAX_PLONE_STARTUP_TIME)
             # See that Plone starts
             plonectl = Command("%s/bin/plonectl" % folder)
-            plonectl("fg", "instance", _timeout=MAX_PLONE_STARTUP_TIME).wait()
+            plonectl("fg", "instance",
+                _out=zope_ready_checker,
+                _err=zope_ready_checker,
+                _timeout=MAX_PLONE_STARTUP_TIME,
+                _ok_code=[0, 143],  # Allow terminate signal
+                ).wait()
+
+    if zope_ready_checker.success:
+        # got the text
+        print "Site starts ok %s" % folder
+    else:
+        # We did not get ok signal
+        sys.exit("Could not start %s - please run on foreground by hand" % folder)
 
 
 def find_plone_sites(root="/srv/plone"):
@@ -616,9 +637,9 @@ def find_plone_sites(root="/srv/plone"):
 
 def buildout_check(name):
     """
-    Checks that a buildout work.
+    Checks that buildout.cfg file works and builds a working Plone site.
     """
-    pass
+    # TODO
 
 
 def restart():
@@ -768,7 +789,7 @@ def install_plone(name, python, version, mode):
         rebootstrap_site(name, folder, python)
 
     # Check we got it up an running Plone installation
-    check(name)
+    check_startup(name)
 
 
 @plac.annotations( \
@@ -804,7 +825,7 @@ def main(create, install, ploneversions, migrate, check, restart,
     elif migrate:
         migrate(name, source, python)
     elif check:
-        check(name)
+        check_startup(name)
     elif ploneversions:
         print_plone_versions()
     elif restart:

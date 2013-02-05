@@ -217,8 +217,8 @@ Does not do
 
 * Set up site backups
 
-Migrate a Plone
-----------------------
+Migrate a Plone site over SSH
+------------------------------
 
 Copies a site (over SSH) from a source server to this server.
 
