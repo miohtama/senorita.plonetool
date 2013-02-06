@@ -24,6 +24,7 @@ from sh import sudo, install, echo, uname, python, which
 from sh import cd, chown, Command
 
 from .utils import read_template
+from .fixbuildout import mod_buildout
 
 # Debian packages we need to install to run out Plone hocus pocus
 # http://plone.org/documentation/manual/installing-plone/installing-on-linux-unix-bsd/debian-libraries
@@ -583,7 +584,11 @@ def migrate_site(name, source, python):
     with sudo(H=True, i=True, u=unix_user, _with=True):
         folder = get_site_folder(name)
         copy_site_files(source, folder)
+
+        # Which old buildout stuff which might have been worn out by time
         fix_bootstrap_py(folder)
+        fix_buildout(os.path.join(folder, "buildout.cfg"), os.path.join(folder, "base.cfg"))
+
         rebootstrap_site(name, folder, python, mr_developer=True)
 
     # Make sure all file permissions are sane after migration
@@ -853,12 +858,25 @@ def install_plone(name, python, version, mode):
         # as we don't want to share ../buildout-cache/egs with other UNIX users
         # on this server
         buildout_base = os.path.join(folder, "base.cfg")
-        remove_lines(buildout_base, ["eggs-directory=../buildout-cache/eggs", "download-cache=../buildout-cache/downloads"])
 
         rebootstrap_site(name, folder, python)
 
+        fix_buildout(os.path.join(folder, "buildout.cfg"), buildout_base)
+
     # Check we got it up an running Plone installation
     check_startup(name)
+
+
+def fix_buildout(buildout_cfg_path):
+    """ Fix a buildout file in-place.
+
+    Guess related buildout files based on the path.
+
+    :param fpath: Path to the buildout.cfg
+    """
+    path = os.path.dirname(buildout_cfg_path)
+    base_cfg_path = os.path.join(path, "base.cfg")
+    mod_buildout(buildout_cfg_path, base_cfg_path)
 
 
 @plac.annotations( \
@@ -868,13 +886,14 @@ def install_plone(name, python, version, mode):
     migrate=("Migrate a Plone site from an existing server", "flag", "m"),
     check=("Check that Plone site configuration under /srv/plone has necessary parts", "flag", "s"),
     restart=("Restart all Plone sites installed on the server", "flag", "r"),
+    fixbuildout=("Upgrade buildout file in-place for the contemporary best practices", "flag", "fb"),
     python=("Which Python interpreter is used for a migrated site", "option", "p", None, None, "/srv/plone/python/python-2.7/bin/python"),
     mode=("Installation mode: 'standalone' or 'cluster'", "option", "im", None, None, "clusten"),
     version=("Which Plone version to install. Defaults the latest stable", "option", "v", None, None),
     name=("Installation name under /srv/plone", "positional", None, None, None, "ploneinstallationname"),
     source=("SSH source for the site migration", "positional", None, None, None, "user@server.com/~folder"),
     )
-def main(create, install, ploneversions, migrate, check, restart,
+def main(create, install, ploneversions, migrate, check, restart, fixbuildout,
     python="/srv/plone/python/python-2.7/bin/python",
     version="latest",
     mode="standalone",
@@ -884,6 +903,7 @@ def main(create, install, ploneversions, migrate, check, restart,
     A sysadmin utility to deploy and maintain multihosting Plone environment.
 
     More info: https://github.com/miohtama/senorita.plonetool
+
     """
 
     # XXX: Implement proper plac subcommands here so we do not need this if...else logic structure
@@ -899,6 +919,8 @@ def main(create, install, ploneversions, migrate, check, restart,
         print_plone_versions()
     elif restart:
         restart()
+    elif fixbuildout:
+        fix_buildout(name)
     else:
         sys.exit("Please give an action or -h for help")
 

@@ -10,19 +10,35 @@
 """
 
 import os
+import stat
 
 # Structure reserving INI parser
 # http://code.google.com/p/iniparse/
-import iniparser
+import iniparse
 
 from collections import OrderedDict
+
+# Which bo section name is used to generate client1, client2, ect
+POSSIBLE_CLIENT_TEMPLATE_SECTIONS = "client_base", "client1", "head", "instance"
+
+
+def guess_client_base(*cfgs):
+    """ Guess what's the master "ZEO client" template in buildout configuratio.
+
+    :return: (buildout iniparser instance, name)
+    """
+
+    for buildout in cfgs:
+        for sect in POSSIBLE_CLIENT_TEMPLATE_SECTIONS:
+            if buildout.has_section(sect):
+                return (buildout, sect)
+
+    return None, None
 
 
 def add_plonectl(*cfgs):
     """
     Add missing plonectl command.
-
-
 
     Your Plone buildout installation must come with functionality ``plonectl`` command
     provided by `plone.recipe.unifiedinstaller buildout recipe <http://pypi.python.org/pypi/plone.recipe.unifiedinstaller/>`_.
@@ -40,32 +56,61 @@ def add_plonectl(*cfgs):
     # For options see http://pypi.python.org/pypi/plone.recipe.unifiedinstaller
     recipe = plone.recipe.unifiedinstaller
     user = admin:admin  # This is not used anywhere after site creation
-
-
     """
 
     # Read parts of all layered configs
     parts = []
 
+    # XXX: Detect by recipe, not by part name
+    part_name = "unifiedinstaller"
+
     for buildout in cfgs:
-        parts += buildout.get('buildout', 'parts').split('\n')
+        if buildout.has_section("buildout"):
+            if buildout.has_option("buildout", "parts"):
+                parts += buildout.get('buildout', 'parts').split('\n')
 
     # We have it already
-    if "unifiedinstaller" in parts:
-        continue
+    if part_name in parts:
+        return
+
+    print "Adding plonectl command to buildout"
 
     # Write out new unifiedinstaller
     buildout = cfgs[0]
     parts = buildout.get('buildout', 'parts').split('\n')
-    parts += "unifiedinstaller"
+    parts += part_name
 
-    buildout.add_section("unifiedinstaller")
-    buildout.set("unifiedinstaler", "recipe", "plone.recipe.unifiedinstaller")
-    buildout.set("unifiedinstaler", "user", "admin:admin")
+    buildout.add_section(part_name)
+    buildout.set(part_name, "recipe", "plone.recipe.unifiedinstaller")
+    buildout.set(part_name, "user", "admin:admin")
 
 
 def add_logrotate(*cfgs):
-    pass
+    """
+
+    This prevents your server disk space eventually fulling with logs.
+
+
+    # Comment the next four lines out if you don't need
+    # automatic log rotation for event and access logs.
+    event-log-max-size = 5 MB
+    event-log-old-files = 5
+    access-log-max-size = 20 MB
+    access-log-old-files = 5
+    """
+    buildout, section = guess_client_base(*cfgs)
+
+    if not buildout:
+        return
+
+    if buildout.has_option(section, "event-log-max-size"):
+        return
+
+    print "Adding logrotate to buildout section %s" % section
+    buildout.set(section, "event-log-max-size", "5 MB")
+    buildout.set(section, "event-log-old-files", "5")
+    buildout.set(section, "access-log-max-size", "20 MB")
+    buildout.set(section, "access-log-old-files", "5")
 
 
 def remove_buildout_cache(*cfgs):
@@ -75,16 +120,35 @@ def remove_buildout_cache(*cfgs):
     This adds additional layer of security. Different UNIX users cannot modify other sites' Python code.
     """
 
-    remove_keys = ["eggs-directory ", "download-cache", "extends-cache"]
+    remove_keys = ["eggs-directory", "download-cache", "extends-cache"]
 
     for buildout in cfgs:
         for key in remove_keys:
             if buildout.has_option("buildout", key):
+                print "Removing buildout option %s" % key
                 buildout.remove_option("buildout", key)
 
 
+def fix_env_vars(*cfgs):
+    """
+    TODO
+
+    Need to add
+
+    zope_i18n_compile_mo_files true
+    PYTHON_EGG_CACHE ${buildout:directory}/var/.python-eggs
+    PYTHONHASHSEED random
+    """
+
+
 def knife_it(*buildouts):
-    add_plonectrl(*buildouts)
+    """
+    Our buildout modification tasklist.
+    """
+    add_plonectl(*buildouts)
+    add_logrotate(*buildouts)
+    #add_random_hash(*buildouts)
+    remove_buildout_cache(*buildouts)
 
 
 def mod_buildout(*paths):
@@ -120,8 +184,5 @@ def mod_buildout(*paths):
         fd = file(path, 'w')
         fd.write(buildout)
         fd.close()
-        os.chmod(fn, stat.S_IRUSR | stat.S_IWUSR)
-
-
-
-
+        # XXX: Not sure about this, but was in orignal code
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)

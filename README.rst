@@ -291,6 +291,25 @@ It will restart all Plone sites found in /srv/plone.
     This command concerns only Zope front end and database processes.
     You need to handle Apache, Nginx, Varnish and others separately.
 
+Fix buildout
+--------------------------------------------
+
+Automatically modify buildout.cfg and base.cfg in place
+to reflect modern Plone best pratices, effectively upgrading
+and fixing old buildouts to be run with ``plonetool``.
+
+Usage::
+
+    plonetool --fixbuildout buildout.cfg  # Automatically disovers base.cfg
+
+Automatizes
+
+* Log rotation enable
+
+* Add missing plonectl command
+
+* Strip out shared egg cache
+
 Security notes
 ==================
 
@@ -349,6 +368,11 @@ To ``senorita.plonetool`` is automatically synced on the server when editing fil
     . venv/bin/activate
     pip install watchdog
     watchmedo shell-command --patterns="*.py" --recursive --command='rsync -av --exclude=venv --exclude=.git . yourserver:~/senorita.plonetool'
+
+Lightweight unit tests provider::
+
+    . venv/bin/activate
+    python -m unittest discover senorita.plonetool
 
 Author
 =======
