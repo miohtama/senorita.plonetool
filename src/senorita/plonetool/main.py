@@ -476,7 +476,14 @@ def copy_site_files(source, target):
     print "Syncing site files from old site %s" % source
     from sh import rsync
     # XXX: --progress here is too verbose, rsync having multiple file transfer indicator?
-    rsync("-a", "--compress-level=9", "--inplace", "--exclude", "*.lock", "--exclude", "*.log", "--exclude", "eggs", "--exclude", "downloads", "--exclude", "parts", "%s/*" % source, target,
+    rsync("-a", "--compress-level=9", "--inplace",
+        "--exclude", "*.lock",
+        "--exclude", "*.log",
+        "--exclude", "eggs",
+        "--exclude", "downloads",
+        "--exclude", "parts",
+        "--exclude", "*.old",
+        "%s/*" % source, target,
         _out=_unbuffered_stdout,
         _err=_unbuffered_stdout,
         _out_bufsize=0).wait()
@@ -587,7 +594,7 @@ def migrate_site(name, source, python):
 
         # Which old buildout stuff which might have been worn out by time
         fix_bootstrap_py(folder)
-        fix_buildout(os.path.join(folder, "buildout.cfg"), os.path.join(folder, "base.cfg"))
+        fix_buildout(os.path.join(folder, "buildout.cfg"))
 
         rebootstrap_site(name, folder, python, mr_developer=True)
 
@@ -857,11 +864,9 @@ def install_plone(name, python, version, mode):
         # We mod the buildout to disable shared cache,
         # as we don't want to share ../buildout-cache/egs with other UNIX users
         # on this server
-        buildout_base = os.path.join(folder, "base.cfg")
-
         rebootstrap_site(name, folder, python)
 
-        fix_buildout(os.path.join(folder, "buildout.cfg"), buildout_base)
+        fix_buildout(os.path.join(folder, "buildout.cfg"))
 
     # Check we got it up an running Plone installation
     check_startup(name)

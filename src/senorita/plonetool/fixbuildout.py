@@ -7,6 +7,9 @@
     Because buildout configs can be layered via extends, we need to pass several configs
     files to be mutated. Sites may have only buildout.cfg, or buildout.cfg + base.cfg (unified installer model).
 
+    We need to implement some magic and heurestics to guess how people have build their
+    buildout.cfgs in the past and we cannot be succesful every time.
+
 """
 
 import os
@@ -77,8 +80,11 @@ def add_plonectl(*cfgs):
 
     # Write out new unifiedinstaller
     buildout = cfgs[0]
-    parts = buildout.get('buildout', 'parts').split('\n')
-    parts += part_name
+    if buildout.has_option("buildout", "parts"):
+        # looks like we fail here if the
+        # buildout syntax uses extends and parts +=
+        parts = buildout.get('buildout', 'parts').split('\n')
+        parts += part_name
 
     buildout.add_section(part_name)
     buildout.set(part_name, "recipe", "plone.recipe.unifiedinstaller")
@@ -178,9 +184,14 @@ def mod_buildout(*paths):
         buildout.read(path)
         cfgs[path] = buildout
 
-    knife_it(cfgs.values())
+    knife_it(*cfgs.values())
 
     for path, buildout in cfgs.items():
+
+        # Stringify content
+        buildout = str(buildout.data)
+
+        # Replace the file
         fd = file(path, 'w')
         fd.write(buildout)
         fd.close()
