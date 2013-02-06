@@ -3,13 +3,15 @@
 Introduction
 ============
 
-``senorita.plonetool`` Python package providing you ``plonetool`` command which allows you to easily create, maintain, diagnose and migrate Plone sites with Plone and Linux best practices. The script is the culmination of headache and alcohol abuse since 2004.
+``senorita.plonetool`` Python package providing you *plonetool* command which allows you to easily create, maintain, diagnose and migrate Plone sites. The script is the culmination of headache and alcohol abuse since 2004.
 
-This tool is designed for a multisite hosting situations where you have several Plone sites
-running on the same server.
+*plonetool* is designed for a multisite hosting situations where
+a small enterprise is hosting several Plone sites from different clients running on the same server.
+The tool is applicable outside its orignal use case as it generally adheres the best practices
+of Linux and Plone world.
 
 * The required packages and other global server setup is automatically
-  done you by ``plonetool``. You can start with a fresh server installation.
+  done you by *plonetool*. You can start with a fresh server installation.
 
 * The server hosts multiple Plone sites in ``/srv/plone`` folder, as per guidelines
   `Linux Filesystem Hierarchy <http://www.tldp.org/LDP/Linux-Filesystem-Hierarchy/html/srv.html>`_.
@@ -22,7 +24,7 @@ running on the same server.
 
 * Some basic automated site maintenance is put in the place: nighly restart cron job, automatic site database packaging, site start up when the server goes up, log rotate
 
-``plonetool`` support Ubuntu / Debian servers and it's tested with Ubuntu 12.04 LTS.
+*plonetool* support Ubuntu / Debian servers and it's tested with Ubuntu 12.04 LTS.
 For other Linux distributions please run `unified installer by hand <http://plone.org/download>`_.
 
 Installing plonetool
@@ -31,7 +33,7 @@ Installing plonetool
 There exist only  *master* version of the tool and more or lessing rolling releases.
 We suggest install the tool under ``/root`` with virtualenv for easy update.
 
-To get started with ``plonetool`` on a clean server do the following::
+To get started with *plonetool* on a clean server do the following::
 
     sudo -i # root me babe!
     apt-get install curl
@@ -42,7 +44,7 @@ To get started with ``plonetool`` on a clean server do the following::
     . venv/bin/activate
     python setup.py develop
 
-Now you have command ``plonetool`` in PATH from ``venv/bin/plonetool``.
+Now you have command *plonetool* in PATH from ``venv/bin/plonetool``.
 You can directly invoke this command as ``/root/senorita.plonetool/venv/bin/plonetool``.
 
 
@@ -165,7 +167,7 @@ Or::
     plonetool --version 4.2 --install yoursitename
 
 The command *should be* able to resume errors, especially if running buildout fails
-due to network errors. After the installation ``plonetool`` checks that your site is
+due to network errors. After the installation *plonetool* checks that your site is
 fully functional (starts up properly).
 
 Please note that by default all Plone sites use port (range) starting at 8080.
@@ -176,15 +178,15 @@ so that all sites have unique ports.
 Differences to Unified installer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The major difference between running Unified Installer by hand and using ``plonetool`` are
+The major difference between running Unified Installer by hand and using *plonetool* are
 
-* ``plonetool`` forces you to follow Linux Standard Base server layout. Init and restart scripts support multiple sites on the same server.
+* *plonetool* forces you to follow Linux Standard Base server layout. Init and restart scripts support multiple sites on the same server.
 
 * ``UNIX user`` for Plone site maintenance is configured for you automatically
 
 * Sites on the server share the Python interpreter (``/srv/plone/python``)
 
-* ``plonetool`` sets file system permissions in more restrictive manner
+* *plonetool* sets file system permissions in more restrictive manner
 
 In both the cases, buildout skeleton is setup by the same `create_instance.py script <https://github.com/plone/Installers-UnifiedInstaller/blob/master/helper_scripts/create_instance.py>`_.
 
@@ -222,17 +224,17 @@ Migrate a Plone site over SSH
 
 Copies a site (over SSH) from a source server to this server.
 
-- Copies site buildout, site data and custom src/
+- Copies site buildout, site data and custom ``src/``
 
 - Rebootstraps buildout on the new server
 
-- You can specify a Python version for old Plone sites
+- Buildout and site startup check after the migration
 
-`Read basics about SSH first <http://opensourcehacker.com/2012/10/24/ssh-key-and-passwordless-login-basics-for-developers/>`_.
+`Read basics about SSH public key handshaking first <http://opensourcehacker.com/2012/10/24/ssh-key-and-passwordless-login-basics-for-developers/>`_. All migration happens over SSH, password free.
 
 Example::
 
-    # Start on your local computer
+    # Start the process on your local computer
     # Setup passwordless SSH key exchange to the old server
     ssh-copy-id user@oldserver.com
 
@@ -243,11 +245,12 @@ Example::
     # Migrate the site from the old server
     plonetool --migrate newsitename oldunixuser@oldserver.example.com:/srv/plone/oldsite
 
-    # You can retype the command to resume migration
+    # You can retype the command above to resume the migration
 
-You can also migrate Plone 3.3 site using automatically installde ``/srv/plone/python/python-2.4/bin/python``::
+You can also migrate Plone 3.3 site using automatically install``/srv/plone/python/python-2.4/bin/python``::
 
     plonetool --migrate --python /srv/plone/python/python-2.4/bin/python newsitename oldunixuser@oldserver.example.com:/srv/plone/oldsite
+
 
 `More info about copying Plone sites <http://plone.org/documentation/kb/copying-a-plone-site>`_
 
@@ -289,7 +292,7 @@ It will restart all Plone sites found in /srv/plone.
 Security notes
 ==================
 
-When migrating sites, ``plonetool`` plainly accepts any SSH hosts you give it without allowing
+When migrating sites, *plonetool* plainly accepts any SSH hosts you give it without allowing
 you manually to check ``known_hosts`` fingerprints. Please check all
 host fingerprints before using the script.
 
