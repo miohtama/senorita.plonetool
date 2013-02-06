@@ -251,6 +251,8 @@ You can also migrate Plone 3.3 site using automatically install``/srv/plone/pyth
 
     plonetool --migrate --python /srv/plone/python/python-2.4/bin/python newsitename oldunixuser@oldserver.example.com:/srv/plone/oldsite
 
+You cannot run migrate command in screen, as because if your SSH agent connection dies
+remote file copying over SSH hangs.
 
 `More info about copying Plone sites <http://plone.org/documentation/kb/copying-a-plone-site>`_
 

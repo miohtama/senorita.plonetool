@@ -37,7 +37,8 @@ setup(name='senorita.plonetool',
           'setuptools',
           'plac',
           'sh',
-          'requests'
+          'requests',
+          'iniparse'
           # -*- Extra requirements: -*-
       ],
       entry_points="""

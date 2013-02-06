@@ -30,6 +30,7 @@ from .utils import read_template
 # https://github.com/miohtama/ztanesh/
 PACKAGES = [
 "acl",
+"curl",
 "supervisor",
 "git-core",
 "highlight",
@@ -197,7 +198,9 @@ def ssh_handshake(target):
     """
     Make sure we get a remote host added in ~/.ssh/known_hosts in sane manner.
 
-    Make sure we are not asked for a password when doing SSH.
+    Make sure we are not asked for a password when doing SSH connection to remote.to
+
+    :param target: SSH spec. May include diretory.
     """
     from sh import ssh
 
@@ -208,7 +211,6 @@ def ssh_handshake(target):
         Handle SSH input
         """
 
-        print "XXX"
         _unbuffered_stdout.write(char.encode())
 
         # Ugh http://stackoverflow.com/a/4852073/315168
@@ -537,6 +539,25 @@ def rebootstrap_site(name, folder, python, mr_developer=False):
         build_it_out()
 
 
+def fix_bootstrap_py(folder):
+    """
+    Update boostrap.py to make sure its the latest version.
+
+    This fixes some buildout bootstrapping failures on old sites.
+
+    http://pypi.python.org/pypi/buildout.bootstrap/
+    """
+    from sh import curl
+
+    bootstrap_py = os.path.join(folder, "boostrap.py")
+
+    print "Updatong %s/bootstrap.py" % folder
+
+    url = "http://svn.zope.org/repos/main/zc.buildout/trunk/bootstrap/bootstrap.py"
+
+    curl("-L", "-o", bootstrap_py, url)
+
+
 def migrate_site(name, source, python):
     """
     Migrate a Plone site from another server.
@@ -562,6 +583,7 @@ def migrate_site(name, source, python):
     with sudo(H=True, i=True, u=unix_user, _with=True):
         folder = get_site_folder(name)
         copy_site_files(source, folder)
+        fix_bootstrap_py(folder)
         rebootstrap_site(name, folder, python, mr_developer=True)
 
     # Make sure all file permissions are sane after migration
