@@ -576,6 +576,7 @@ def migrate_site(name, source, python):
 
     :param python: Python interpreter used for the new installation
     """
+    from sh import rm
 
     require_ssh_agent()
 
@@ -592,8 +593,16 @@ def migrate_site(name, source, python):
         folder = get_site_folder(name)
         copy_site_files(source, folder)
 
-        # Which old buildout stuff which might have been worn out by time
+        # Reinstall bootstrap which might have been worn out by time
         fix_bootstrap_py(folder)
+
+        # Delete mr. develop script to make sure that it
+        # gets re-created with a our new Python interpreter set-up
+        mr_develop = os.path.join(folder, "bin", "develop")
+        if os.path.exists(mr_develop):
+            rm(mr_develop)
+
+        # Apply automatic buildout fixes
         fix_buildout(os.path.join(folder, "buildout.cfg"))
 
         rebootstrap_site(name, folder, python, mr_developer=True)
@@ -623,7 +632,7 @@ def check_startup(name):
         sys.exit("No UNIX user on the server: %s" % user)
 
     # Detect a running Plone site by a ZODB database lock file
-    if os.path.exists(os.path.join(folder, "var", "Data.fs.lock")):
+    if os.path.exists(os.path.join(folder, "var", "instance.lock")) or os.path.exists(os.path.join(folder, "var", "client1.lock")):
         sys.exit("Site at %s must be cleanly stopped for the sanity check" % folder)
 
     if not os.path.exists(os.path.join(folder, "bin", "plonectl")):
