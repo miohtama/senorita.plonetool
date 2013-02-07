@@ -870,21 +870,21 @@ def install_plone(name, python, version, mode):
         # Delete our Github installer checkout and messy files
         rm("-rf", temp_folder)
 
-    # Restrict FS access
-    reset_permissions(unix_user, folder)
-
     # Integrate with LSB
     create_site_base(name)
 
+    # Restrict FS access over what unified installer did for us
+    reset_permissions(unix_user, folder)
+
     # Run buildout... we should be able to resume from errors
     with sudo(H=True, i=True, u=unix_user, _with=True):
+
+        fix_buildout(os.path.join(folder, "buildout.cfg"))
 
         # We mod the buildout to disable shared cache,
         # as we don't want to share ../buildout-cache/egs with other UNIX users
         # on this server
         rebootstrap_site(name, folder, python)
-
-        fix_buildout(os.path.join(folder, "buildout.cfg"))
 
     # Check we got it up an running Plone installation
     check_startup(name)
