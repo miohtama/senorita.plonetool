@@ -162,6 +162,21 @@ def knife_it(*buildouts):
     remove_buildout_cache(*buildouts)
 
 
+def write_buildout(path, buildout):
+    """
+    Write out a parsed buildout.cfg INI.
+    """
+    # Stringify content
+    buildout = str(buildout.data)
+
+    # Replace the file
+    fd = file(path, 'w')
+    fd.write(buildout)
+    fd.close()
+    # XXX: Not sure about this, but was in orignal code
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+
 def mod_buildout(*paths):
     """ Modify buildout file(s).
 
@@ -192,13 +207,33 @@ def mod_buildout(*paths):
     knife_it(*cfgs.values())
 
     for path, buildout in cfgs.items():
+        write_buildout(path, buildout)
 
-        # Stringify content
-        buildout = str(buildout.data)
 
-        # Replace the file
-        fd = file(path, 'w')
-        fd.write(buildout)
-        fd.close()
-        # XXX: Not sure about this, but was in orignal code
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+def set_buildout_port(path, mode, port):
+    """
+    Set HTTP port in a buildout.
+
+    In the case of cluster install, set port range start.
+
+    :param path: Path to a buildout.cfg
+
+    :param mode: "standalone" or "cluster"
+    """
+    buildout = iniparse.RawConfigParser()
+    buildout.read(path)
+
+    port = int(port)
+
+    if mode == "standalone":
+        print "Updating buildout.cfg port to %s" % port
+        buildout.set("instance", "http-address", port)
+    else:
+        print "Updating buildout.cfg port range to %s" % port
+        buildout.set("zeoserver",  "zeo-address", port)
+        port += 1
+        for part in ["client1", "client2", "client3", "client4"]:
+            if buildout.has_section(part):
+                buildout.set(part, "http-address", port)
+
+    write_buildout(path, buildout)

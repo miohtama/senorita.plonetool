@@ -24,7 +24,7 @@ from sh import sudo, install, echo, uname, python, which
 from sh import cd, chown, Command
 
 from .utils import read_template
-from .fixbuildout import mod_buildout
+from .fixbuildout import mod_buildout, set_buildout_port
 
 # Debian packages we need to install to run out Plone hocus pocus
 # http://plone.org/documentation/manual/installing-plone/installing-on-linux-unix-bsd/debian-libraries
@@ -649,7 +649,7 @@ def migrate_site(name, folder, unix_user, source, python):
     # Make sure all file permissions are sane after migration
     reset_permissions(unix_user, folder)
 
-    check_startup(name)
+    check_startup(name, folder, unix_user)
 
     print "Migrated site %s and it appears to be working" % name
 
@@ -860,7 +860,7 @@ def print_plone_versions():
         print "   %s" % v
 
 
-def install_plone(name, folder, unix_user, python, version, mode):
+def install_plone(name, folder, unix_user, python, version, mode, port):
     """
     Installs a new Plone site using best practices.
     """
@@ -927,13 +927,15 @@ def install_plone(name, folder, unix_user, python, version, mode):
 
         fix_buildout(folder)
 
+        set_buildout_port(os.path.join(folder, "buildout.cfg"), mode, port)
+
         # We mod the buildout to disable shared cache,
         # as we don't want to share ../buildout-cache/egs with other UNIX users
         # on this server
         rebootstrap_site(name, folder, python)
 
     # Check we got it up an running Plone installation
-    check_startup(name)
+    check_startup(name, folder, unix_user)
 
 
 def fix_buildout(folder):
@@ -962,6 +964,7 @@ def fix_buildout(folder):
     mode=("Installation mode: 'standalone' or 'cluster'", "option", "im", None, None, "clusten"),
     version=("Which Plone version to install. Defaults the latest stable", "option", "v", None, None),
     user=("UNIX user which we use for create, migration and install. Defaults to installation folder name", "option", "u", None, None),
+    port=("HTTP port or port range start for new installations", "option", "po", None, None),
     folder=("Path to target folder", "positional", None, None, None, "ploneinstallationname"),
     source=("SSH source for the site migration", "positional", None, None, None, "user@server.com/~folder"),
     )
@@ -969,6 +972,7 @@ def main(create, install, ploneversions, migrate, check, restartall, stopall, fi
     python="/srv/plone/python/python-2.7/bin/python",
     version="latest",
     mode="standalone",
+    port=8080,
     user=None,
     folder="/srv/plone/mysite",
     source=None):
@@ -986,14 +990,14 @@ def main(create, install, ploneversions, migrate, check, restartall, stopall, fi
     elif install:
         # XXX: get rid of setup_context() and pass explicit parameters
         name, folder, user = setup_context(folder, user)
-        install_plone(name, folder, user, python, version, mode)
+        install_plone(name, folder, user, python, version, mode, port)
     elif migrate:
         # XXX: get rid of setup_context() and pass explicit parameters
         name, folder, user = setup_context(folder, user)
         migrate_site(name, folder, user, source, python)
     elif check:
         name, folder, user = setup_context(folder, user)
-        check_startup(folder)
+        check_startup(name, folder, user)
     elif ploneversions:
         print_plone_versions()
     elif restartall:

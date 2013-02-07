@@ -387,6 +387,12 @@ Currently the script recommends ``/srv/plone`` file system layout,
 but this is not a limitation and you can have ``/var/www`` etc.
 layout also.
 
+Quality assurance
+==========================
+
+*plonetool* comes with an automatic test suite which stresses
+out all the commands provided.
+
 Other
 =============
 

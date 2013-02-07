@@ -48,13 +48,13 @@ plonetool --ploneversions
 plonetool --create $TESTPATH/plone1 --user senorita1
 
 # standalone install
-plonetool --install $TESTPATH/senorita2
+plonetool --install --port 54001 $TESTPATH/senorita2
 
 # buildout fix
 plonetool --fixbuildout $TESTPATH/senorita2
 
 # zeo cluster install
-plonetool --install --mode cluster --user senorita2 $TESTPATH/senorita3
+plonetool --install --mode cluster --port 54002 --user senorita2 $TESTPATH/senorita3
 
 # migrate over ssh
 # For ssh-add-id see https://github.com/miohtama/ztanesh/blob/master/zsh-scripts/bin/ssh-add-id
