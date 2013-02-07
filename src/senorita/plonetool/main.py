@@ -78,6 +78,15 @@ MAX_PLONE_STARTUP_TIME = 300
 # plac subcommands http://plac.googlecode.com/hg/doc/plac.html#implementing-subcommands
 commands = 'create', 'migrate', 'versions', 'restart', 'check', 'find'
 
+#: Target installation UNIX user
+_user = None
+
+#: Target installation folder
+_folder = None
+
+#: Target site name
+_site_name = None
+
 
 def generate_password():
     """
@@ -96,18 +105,51 @@ def check_known_environment():
         sys.exit("This script has been tested only with Ubuntu/Debian environments")
 
 
-def get_site_folder(site_name):
+def guess_plone_site_name_and_user(folder):
+    """
+    Determine Plone site UNIX user and name from the installation folder.
+    """
+
+    site_name = os.path.basename(folder)
+    user = site_name
+    return site_name, user
+
+
+def setup_context(folder, user):
+    """
+    Determine used site name, folder and user from command line input.
+
+    setup_context() applies only command line commands operating against a single Plone site.
+    For multisite commands, determine user for each site using ``guess_plone_site_name_and_user()``.
+    """
+
+    global _site_name, _user, _folder
+
+    _site_name, _user = guess_plone_site_name_and_user(folder)
+
+    if user:
+        # Override UNIX user
+        _user = user
+
+    _folder = os.path.abspath(folder)
+
+
+def get_site_name():
+    return _site_name
+
+
+def get_site_folder():
     """
     Where our Plone installation will be.
     """
-    return "/srv/plone/%s" % site_name
+    return _folder
 
 
-def get_unix_user(site_name):
+def get_unix_user():
     """
     Which UNIX user will control the file-system permissions.
     """
-    return site_name
+    return _user
 
 
 def get_unix_user_home(username):
@@ -115,6 +157,15 @@ def get_unix_user_home(username):
     Where is home folder for a UNIX user
     """
     return "/home/%s" % username
+
+
+def check_supported_version(version):
+    """
+    Check if Plone installation for the given version is supported for the version.
+    """
+
+    if version.startswith("3"):
+        sys.exit("Sorry, no Plone 3 installs through this script")
 
 
 _unbuffered_stdout = os.fdopen(sys.stdout.fileno(), "wb", 0)
@@ -264,7 +315,7 @@ def allow_non_root_user_to_share_ssh_agent_forwarding(username):
     setfacl("-m", "u:%s:x" % username, os.path.dirname(os.environ["SSH_AUTH_SOCK"]))
 
 
-def create_python_env():
+def create_python_env(folder):
     """
     Compile a Python environment with various Python versions to run Plone.
 
@@ -274,34 +325,40 @@ def create_python_env():
     """
     from sh import git
 
-    print "Setting up various Python versions"
+    python_target = os.path.join(folder, "python")
+
+    print "Setting up various Python versions at %s" % python_target
 
     with sudo:
 
-        if not os.path.exists("/srv/plone/python"):
-            cd("/srv/plone")
+        if not os.path.exists(python_target):
+            cd(folder)
             git("clone", "git://github.com/collective/buildout.python.git", "python")
 
-        if not os.path.exists("/srv/plone/python/python-2.7/bin/python"):
-            cd("/srv/plone/python")
-            echo(PYTHON_BUILDOUT, _out="/srv/plone/python/buildout.cfg")
+        if not os.path.exists(os.path.join(python_target, "python-2.7/bin/python")):
+            cd(python_target)
+            echo(PYTHON_BUILDOUT, _out="%s/buildout.cfg" % python_target)
             python("bootstrap.py")
-            run = Command("/srv/plone/python/bin/buildout")
+            run = Command("%s/bin/buildout" % python_target)
             run()
+
+        pip = Command("/python-2.7/bin/pip" % python_target)
+
+        # Avoid buildout bootstrap global python write bug using Distribute 0.6.27
+        pip("install", "--upgrade", "Distribute")
 
         # Plone 4.x sites heavily rely on lxml
         # Create a shared lxml installation. System deps should have been installed before.
         # for plone 3.x do this by hand
         # collective.buildout.python does not do lxml, which is crucial
-        pip = Command("/srv/plone/python/python-2.7/bin/pip")
         pip("install", "lxml")
 
 
-def create_base():
+def create_base(folder):
     """
     Create multisite Plone hosting infrastructure on a server..
 
-    Host sites at /srv/plone
+    Host sites at /srv/plone or chosen cache_folder
 
     Each folder has a file called buildout.cfg which is the production buildout file
     for this site. This might not be a real file, but a symlink to a version controlled
@@ -309,6 +366,8 @@ def create_base():
 
     Log rotate is performed using a global UNIX log rotate script:
     http://opensourcehacker.com/2012/08/30/autodiscovering-log-files-for-logrotate/
+
+    :param folder: Installatoin target folder
     """
     from sh import apt_get
 
@@ -324,21 +383,16 @@ def create_base():
             apt_get("install", "-y", *PACKAGES)
 
         # Create base folder
-        if not os.path.exists("/srv/plone"):
-            print "Creating /srv/plone"
-            install("/srv/plone", "-d")
+        if not os.path.exists(folder):
+            print "Creating installation base %s" % folder
+            install(folder, "-d")
 
         # Create nightly restart cron job
         if os.path.exists("/etc/cron.d"):
             print "(Re)setting all sites nightly restart cron job"
             echo(CRON_TEMPLATE, _out=CRON_JOB)
 
-        # Create buildout shared cache folder if some buildouts use them
-        if not os.path.exists("/srv/plone/buildout-cache/eggs"):
-            install("-d", "/srv/plone/buildout-cache/eggs")
-            install("-d", "/srv/plone/buildout-cache/downloads")
-
-    create_python_env()
+    create_python_env(folder)
 
 
 def has_user(user):
@@ -414,7 +468,7 @@ def reset_permissions(username, folder):
     chmod("-R", "o-rwx", folder)
 
 
-def create_site_initd_script(name):
+def create_site_initd_script(name, folder, username):
     """
     Install /etc/init.d boot script for a Plone site.
 
@@ -429,9 +483,6 @@ def create_site_initd_script(name):
 
     updaterc = Command("/usr/sbin/update-rc.d")
 
-    username = create_plone_unix_user(name)
-    folder = get_site_folder(name)
-
     script_body = DEBIAN_BOOT_TEMPLATE % dict(user=username, folder=folder, name=name)
 
     initd_script = "/etc/init.d/%s" % name
@@ -443,7 +494,7 @@ def create_site_initd_script(name):
         updaterc(name, "defaults")
 
 
-def create_site_base(name):
+def create_site_base(name, folder, username):
     """
     Create an empty Plone site installation and corresponding UNIX user.
 
@@ -451,9 +502,9 @@ def create_site_base(name):
     """
     check_known_environment()
 
-    create_base()
+    create_base(folder)
 
-    username = create_plone_unix_user(name)
+    create_plone_unix_user(username)
 
     # Enable friendly
     give_user_ztanesh(username)
@@ -461,7 +512,7 @@ def create_site_base(name):
     folder = get_site_folder(name)
 
     with sudo:
-        print "Creating a Plone site %s folder %s" % (name, folder)
+        print "Creating a Plone site %s folder %s for UNIX user %s" % (name, folder, username)
         install("-d", folder)
         reset_permissions(username, folder)
 
@@ -741,26 +792,36 @@ def buildout_check(name):
     # TODO
 
 
-def restart():
+
+def get_plone_processes(folder, zeo_type):
+    """
+
+    """
+    # List of processes we need to start/stop
+    processes = []
+
+    if zeo_type == "zeo":
+        # Get all binaries we need to restart
+        for x in range(1, 12):
+            bin_name = os.path.join(folder, "bin", "client%d" % x)
+            if os.path.exists(bin_name):
+                processes.append(bin_name)
+        processes.append(os.path.join(folder, "bin", "zeoserver"))
+    else:
+        processes.append(os.path.join(folder, "bin", "instance"))
+
+    return processes
+
+
+def restart_all():
     """
     Restart all sites installed on the server.
 
     If sites are in ZEO front end clusters try to do soft restarts so that there is at least one client up all the time.
     """
 
-    # List of processes we need to start/stop
-    processes = []
-
     for folder, zeo_type, name in find_plone_sites("/srv/plone"):
-        if zeo_type == "zeo":
-            # Get all binaries we need to restart
-            for x in range(1, 12):
-                bin_name = os.path.join(folder, "bin", "client%d" % x)
-                if os.path.exists(bin_name):
-                    processes.append(bin_name)
-            processes.append(os.path.join(folder, "bin", "zeoserver"))
-        else:
-            processes.append(os.path.join(folder, "bin", "instance"))
+        processes = get_plone_processes(folder, zeo_type)
 
     # Restart processes one by one
     # so that there should be always
@@ -772,6 +833,20 @@ def restart():
             # Don't mess with database server too long
             time.sleep(20)
         cmd("start")
+
+
+def stop_all():
+    """
+    Stop all sites installed on the server.
+    """
+
+    for folder, zeo_type, name in find_plone_sites("/srv/plone"):
+        processes = get_plone_processes(folder, zeo_type)
+
+    for p in processes:
+        print "Restarting process %s" % p
+        cmd = Command(p)
+        cmd("stop")
 
 
 def get_plone_versions():
@@ -811,15 +886,12 @@ def print_plone_versions():
         print "   %s" % v
 
 
-def install_plone(name, python, version, mode):
+def install_plone(name, folder, unix_user, python, version, mode):
     """
     Installs a new Plone site using best practices.
     """
 
     from sh import git, bash, install, touch, rm
-
-    folder = get_site_folder(name)
-    unix_user = get_unix_user(name)
 
     if os.path.exists(folder) and not os.path.exists(os.path.join(folder, "buildout.cfg")):
         sys.exit("%s exists, but seems to lack buildout.cfg. Please remove first." % folder)
@@ -879,7 +951,7 @@ def install_plone(name, python, version, mode):
     # Run buildout... we should be able to resume from errors
     with sudo(H=True, i=True, u=unix_user, _with=True):
 
-        fix_buildout(os.path.join(folder, "buildout.cfg"))
+        fix_buildout(folder)
 
         # We mod the buildout to disable shared cache,
         # as we don't want to share ../buildout-cache/egs with other UNIX users
@@ -890,14 +962,15 @@ def install_plone(name, python, version, mode):
     check_startup(name)
 
 
-def fix_buildout(buildout_cfg_path):
+def fix_buildout(folder):
     """ Fix a buildout file in-place.
 
     Guess related buildout files based on the path.
 
     :param fpath: Path to the buildout.cfg
     """
-    path = os.path.dirname(buildout_cfg_path)
+    path = folder
+    buildout_cfg_path = os.path.join(path, "buildout.cfg")
     base_cfg_path = os.path.join(path, "base.cfg")
     mod_buildout(buildout_cfg_path, base_cfg_path)
 
@@ -908,19 +981,22 @@ def fix_buildout(buildout_cfg_path):
     ploneversions=("List available Plone versions", "flag", "pv"),
     migrate=("Migrate a Plone site from an existing server", "flag", "m"),
     check=("Check that Plone site configuration under /srv/plone has necessary parts", "flag", "s"),
-    restart=("Restart all Plone sites installed on the server", "flag", "r"),
-    fixbuildout=("Upgrade buildout file in-place for the contemporary best practices", "flag", "fb"),
+    restartall=("Restart all Plone sites installed on the server in a specific folder. Default folder /srv/plone", "flag", "ra"),
+    stopall=("Stop all Plone sites installed on the server in a specific folder. Default folder /srv/plone", "flag", "sa"),
+    fixbuildout=("Upgrade buildout file in-place in a folder for the contemporary best practices", "flag", "fb"),
     python=("Which Python interpreter is used for a migrated site", "option", "p", None, None, "/srv/plone/python/python-2.7/bin/python"),
     mode=("Installation mode: 'standalone' or 'cluster'", "option", "im", None, None, "clusten"),
     version=("Which Plone version to install. Defaults the latest stable", "option", "v", None, None),
-    name=("Installation name under /srv/plone", "positional", None, None, None, "ploneinstallationname"),
+    user=("UNIX user which we use for create, migration and install. Defaults to installation folder name", "option", "u", None, None),
+    folder=("Installation folder name", "positional", None, None, None, "ploneinstallationname"),
     source=("SSH source for the site migration", "positional", None, None, None, "user@server.com/~folder"),
     )
-def main(create, install, ploneversions, migrate, check, restart, fixbuildout,
+def main(create, install, ploneversions, migrate, check, restartall, stopall, fixbuildout,
     python="/srv/plone/python/python-2.7/bin/python",
     version="latest",
     mode="standalone",
-    name=None,
+    user=None,
+    folder="/srv/plone/mysite",
     source=None):
     """
     A sysadmin utility to deploy and maintain multihosting Plone environment.
@@ -931,19 +1007,31 @@ def main(create, install, ploneversions, migrate, check, restart, fixbuildout,
 
     # XXX: Implement proper plac subcommands here so we do not need this if...else logic structure
     if create:
-        create_site_base(name)
+        # XXX: get rid of setup_context() and pass explicit parameters
+        setup_context(folder, user)
+        create_site_base(get_site_name(), get_site_folder(), get_unix_user())
     elif install:
-        install_plone(name, python, version, mode)
+        # XXX: get rid of setup_context() and pass explicit parameters
+        setup_context(folder, user)
+        install_plone(get_site_name(), get_site_folder(), get_unix_user(), python, version, mode)
     elif migrate:
-        migrate_site(name, source, python)
+        # XXX: get rid of setup_context() and pass explicit parameters
+        setup_context(folder, user)
+        migrate_site(get_site_name(), source, python)
     elif check:
-        check_startup(name)
+        check_startup(folder)
     elif ploneversions:
         print_plone_versions()
-    elif restart:
-        restart()
+    elif restartall:
+        if not folder:
+            folder = "/srv/plone"
+        restart_all(folder)
+    elif stopall:
+        if not folder:
+            folder = "/srv/plone"
+        stop_all(folder)
     elif fixbuildout:
-        fix_buildout(name)
+        fix_buildout(folder)
     else:
         sys.exit("Please give an action or -h for help")
 

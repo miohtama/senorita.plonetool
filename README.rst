@@ -131,12 +131,16 @@ TODO: Pack the site database automatically.
 Usage
 ======
 
-Because this script will ``sudo`` to different UNIX users assuming no password prompt the only sensible
-way to run this script is as a root.
+Because this script may ``sudo`` to different UNIX users and
+poke root-managed global Python installation,
+the only way to run this script in create, install etc.
+use cases is to run as root.
 
 You can execute Plone tool directly from its installation location::
 
     /root/senorita.plonetool/venv/bin/plonetool
+
+Some commands like ``--fixbuildout`` work fine without root, though.
 
 List Plone versions
 -------------------------------------
@@ -386,6 +390,11 @@ Lightweight unit tests provider::
 
     . venv/bin/activate
     python -m unittest discover senorita.plonetool
+
+A command-line script which executes all commands against an empty (discarable) UNIX server::
+
+    sudo -i
+    ~/senorita.plonetool/src/senorita/plonetool/test-all.sh
 
 Author
 =======
