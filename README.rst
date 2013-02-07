@@ -188,6 +188,8 @@ The major difference between running Unified Installer by hand and using *plonet
 
 * *plonetool* sets file system permissions in more restrictive manner
 
+* *plonetool* supports Plone 3.x installations
+
 In both the cases, buildout skeleton is setup by the same `create_instance.py script <https://github.com/plone/Installers-UnifiedInstaller/blob/master/helper_scripts/create_instance.py>`_.
 
 Create an empty Plone installation
@@ -342,11 +344,22 @@ Add it to your buildout if needed::
 
 
     [unifiedinstaller]
+    # This recipe installationls the plonectl script and a few other convenience
+    # items.
+    # For options see http://pypi.python.org/pypi/plone.recipe.unifiedinstaller
+    recipe = plone.recipe.unifiedinstaller
+    user = admin:admin  # This is not used anywhere after site creation
+
+More complex example with two ZEO front end clients::
+
+    [unifiedinstaller]
     # This recipe installs the plonectl script and a few other convenience
     # items.
     # For options see http://pypi.python.org/pypi/plone.recipe.unifiedinstaller
     recipe = plone.recipe.unifiedinstaller
     user = admin:admin  # This is not used anywhere after site creation
+    zeoserver = zeoserver
+    clients = client1 client2
 
 Currently the script does not allow other file system layouts besides /srv/plone, but supporting them is easy to add.
 

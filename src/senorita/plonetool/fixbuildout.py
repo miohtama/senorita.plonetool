@@ -68,6 +68,11 @@ def add_plonectl(*cfgs):
     part_name = "unifiedinstaller"
 
     for buildout in cfgs:
+
+        if buildout.has_section(part_name):
+            # += added section, iniparser can't understand, etc
+            return
+
         if buildout.has_section("buildout"):
             if buildout.has_option("buildout", "parts"):
                 parts += buildout.get('buildout', 'parts').split('\n')

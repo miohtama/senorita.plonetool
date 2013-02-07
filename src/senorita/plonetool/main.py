@@ -289,6 +289,13 @@ def create_python_env():
             run = Command("/srv/plone/python/bin/buildout")
             run()
 
+        # Plone 4.x sites heavily rely on lxml
+        # Create a shared lxml installation. System deps should have been installed before.
+        # for plone 3.x do this by hand
+        # collective.buildout.python does not do lxml, which is crucial
+        pip = Command("/srv/plone/python/python-2.7/bin/pip")
+        pip("install", "lxml")
+
 
 def create_base():
     """
@@ -465,7 +472,10 @@ def create_site_base(name):
 
 def copy_site_files(source, target):
     """
-    Rsync all non-regeneratable Plone files
+    Rsync all non-regeneratable Plone files.
+
+    We also *must* not copy some files as they would mess up
+    running the buildout on the new target.
 
     http://plone.org/documentation/kb/copying-a-plone-site
     """
@@ -477,12 +487,16 @@ def copy_site_files(source, target):
     from sh import rsync
     # XXX: --progress here is too verbose, rsync having multiple file transfer indicator?
     rsync("-a", "--compress-level=9", "--inplace",
-        "--exclude", "*.lock",
-        "--exclude", "*.log",
+        "--exclude", "*.lock",  # Data.fs.lock, instance.lock
+        "--exclude", "*.pid",
+        "--exclude", "*.log",  # A lot of text data we probably don't need on the new server
         "--exclude", "eggs",
-        "--exclude", "downloads",
-        "--exclude", "parts",
-        "--exclude", "*.old",
+        "--exclude", "downloads",  # Redownload
+        "--exclude", "parts",  # Buildout always regenerates this folder
+        "--exclude", "bin",  # old bin/ scripts may not regenereate, point to Py interpreter on the old server
+        "--exclude", ".installed.cfg",  # Otherwise does not regenerate zeoserver
+        "--exclude", ".mr.developer.cfg",
+        "--exclude", "*.old",     # Data.fs.old
         "%s/*" % source, target,
         _out=_unbuffered_stdout,
         _err=_unbuffered_stdout,
@@ -492,6 +506,7 @@ def copy_site_files(source, target):
     install("-d", "%s/eggs" % target)
     install("-d", "%s/parts" % target)
     install("-d", "%s/downloads" % target)
+    install("-d", "%s/bin" % target)
 
 
 def rebootstrap_site(name, folder, python, mr_developer=False):
@@ -576,8 +591,6 @@ def migrate_site(name, source, python):
 
     :param python: Python interpreter used for the new installation
     """
-    from sh import rm
-
     require_ssh_agent()
 
     allow_ssh_agent_thru_sudo()
@@ -595,12 +608,6 @@ def migrate_site(name, source, python):
 
         # Reinstall bootstrap which might have been worn out by time
         fix_bootstrap_py(folder)
-
-        # Delete mr. develop script to make sure that it
-        # gets re-created with a our new Python interpreter set-up
-        mr_develop = os.path.join(folder, "bin", "develop")
-        if os.path.exists(mr_develop):
-            rm(mr_develop)
 
         # Apply automatic buildout fixes
         fix_buildout(os.path.join(folder, "buildout.cfg"))
@@ -632,8 +639,10 @@ def check_startup(name):
         sys.exit("No UNIX user on the server: %s" % user)
 
     # Detect a running Plone site by a ZODB database lock file
-    if os.path.exists(os.path.join(folder, "var", "instance.lock")) or os.path.exists(os.path.join(folder, "var", "client1.lock")):
-        sys.exit("Site at %s must be cleanly stopped for the sanity check" % folder)
+    for lock_file in ["instance.lock", "client1.lock"]:
+        lock = os.path.join(folder, "var", lock_file)
+        if os.path.exists(lock):
+            sys.exit("Site at %s must be cleanly stopped for the sanity check. Please delete lock file %s if this is not correct." % (folder, lock))
 
     if not os.path.exists(os.path.join(folder, "bin", "plonectl")):
         sys.exit("plonectl command missing for %s" % folder)
