@@ -164,11 +164,11 @@ as described in *Create an empty Plone installation*..
 
 To install the latest Plone version as *yoursitename*::
 
-    plonetool --install yoursitename #
+    plonetool --install /srv/plone/yoursitename #
 
-Or::
+Or more advanced::
 
-    plonetool --version 4.2 --install yoursitename
+    plonetool --version 4.2 --user myunixuser --install /tmp/plone-test/yoursitename
 
 The command *should be* able to resume errors, especially if running buildout fails
 due to network errors. After the installation *plonetool* checks that your site is
@@ -203,7 +203,7 @@ This command creates an empty server structure where you can drop in your Plone 
 
 Example::
 
-    plonetool --create mysitename
+    plonetool --create /srv/plone/mysitename
 
 Does
 
@@ -249,13 +249,13 @@ Example::
     ssh -A root@newserver.com
 
     # Migrate the site from the old server
-    plonetool --migrate newsitename oldunixuser@oldserver.example.com:/srv/plone/oldsite
+    plonetool --migrate /srv/plone/newsite oldunixuser@oldserver.example.com:/srv/plone/oldsite
 
     # You can retype the command above to resume the migration
 
 You can also migrate Plone 3.3 site using automatically install``/srv/plone/python/python-2.4/bin/python``::
 
-    plonetool --migrate --python /srv/plone/python/python-2.4/bin/python newsitename oldunixuser@oldserver.example.com:/srv/plone/oldsite
+    plonetool --migrate --python /srv/plone/python/python-2.4/bin/python /srv/plone/newsite oldunixuser@oldserver.example.com:/srv/plone/oldsite
 
 You cannot run migrate command in screen, as because if your SSH agent connection dies
 remote file copying over SSH hangs.
@@ -267,7 +267,7 @@ Check that Plone site works
 
 You can use script to check whether an installation under ``/srv/plone`` works::
 
-     plonetool --check yoursitename
+     plonetool --check /srv/plone/mysite
 
 It checks
 
@@ -288,7 +288,7 @@ This is a useful shortcut for
 
 Simply run as root::
 
-    plonetool --restart
+    plonetool --restartall /srv/plone
 
 It will restart all Plone sites found in /srv/plone.
 
@@ -296,6 +296,15 @@ It will restart all Plone sites found in /srv/plone.
 
     This command concerns only Zope front end and database processes.
     You need to handle Apache, Nginx, Varnish and others separately.
+
+Stop all sites
+--------------------------------------------
+
+Stops all sites cleanly.
+
+Example::
+
+    plonetool --stopall /srv/plone
 
 Fix buildout
 --------------------------------------------
@@ -306,7 +315,8 @@ and fixing old buildouts to be run with ``plonetool``.
 
 Usage::
 
-    plonetool --fixbuildout buildout.cfg  # Automatically disovers base.cfg
+    # Automatically discovers buidlout.cfg, base.cfg
+    plonetool --fixbuildout /srv/plone/mysite
 
 Automatizes
 
@@ -319,12 +329,20 @@ Automatizes
 Security notes
 ==================
 
+SSH fingerprint warning
+--------------------------
+
 When migrating sites, *plonetool* plainly accepts any SSH hosts you give it without allowing
 you manually to check ``known_hosts`` fingerprints. Please check all
-host fingerprints before using the script.
+host fingerprints before running the script.
 
-The script supports shared Python eggs folder under ``/srv/plone/buildout-cache``
-but security wise this is bad idea. Instead, only on local development machines I recommend adding a
+Shared eggs
+---------------
+
+The script automatically disables all possible shared buildout egg cache
+and download cache folders it finds in buildouts.
+
+Instead, only on local development machines I recommend adding a
 `buildout global configuration file <http://plone.org/documentation/manual/developer-manual/managing-projects-with-buildout/creating-a-buildout-defaults-file>`_  ~/.buildout/default.cfg::
 
     # OSX example
@@ -365,9 +383,9 @@ More complex example with two ZEO front end clients::
     zeoserver = zeoserver
     clients = client1 client2
 
-Currently the script does not allow other file system layouts besides /srv/plone, but supporting them is easy to add.
-
-Currently only ``/srv/plone/python`` Python set-ups are supported.
+Currently the script recommends ``/srv/plone`` file system layout,
+but this is not a limitation and you can have ``/var/www`` etc.
+layout also.
 
 Other
 =============
@@ -394,7 +412,11 @@ Lightweight unit tests provider::
 A command-line script which executes all commands against an empty (discarable) UNIX server::
 
     sudo -i
+    . ~/senorita.plonetool/venv/bin/activate
     ~/senorita.plonetool/src/senorita/plonetool/test-all.sh
+
+Please note that running this is extremery slow. If you have
+failing cases consider re-run them by hand by copy-pasting them from the script.
 
 Author
 =======

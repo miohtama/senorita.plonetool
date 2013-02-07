@@ -123,33 +123,16 @@ def setup_context(folder, user):
     For multisite commands, determine user for each site using ``guess_plone_site_name_and_user()``.
     """
 
-    global _site_name, _user, _folder
-
     _site_name, _user = guess_plone_site_name_and_user(folder)
 
     if user:
+
         # Override UNIX user
         _user = user
 
     _folder = os.path.abspath(folder)
 
-
-def get_site_name():
-    return _site_name
-
-
-def get_site_folder():
-    """
-    Where our Plone installation will be.
-    """
-    return _folder
-
-
-def get_unix_user():
-    """
-    Which UNIX user will control the file-system permissions.
-    """
-    return _user
+    return _site_name, _folder, _user
 
 
 def get_unix_user_home(username):
@@ -335,14 +318,14 @@ def create_python_env(folder):
             cd(folder)
             git("clone", "git://github.com/collective/buildout.python.git", "python")
 
-        if not os.path.exists(os.path.join(python_target, "python-2.7/bin/python")):
+        if not os.path.exists(os.path.join(python_target, "python-2.7", "bin", "python")):
             cd(python_target)
             echo(PYTHON_BUILDOUT, _out="%s/buildout.cfg" % python_target)
             python("bootstrap.py")
             run = Command("%s/bin/buildout" % python_target)
             run()
 
-        pip = Command("/python-2.7/bin/pip" % python_target)
+        pip = Command("%s/python-2.7/bin/pip" % python_target)
 
         # Avoid buildout bootstrap global python write bug using Distribute 0.6.27
         pip("install", "--upgrade", "Distribute")
@@ -367,7 +350,7 @@ def create_base(folder):
     Log rotate is performed using a global UNIX log rotate script:
     http://opensourcehacker.com/2012/08/30/autodiscovering-log-files-for-logrotate/
 
-    :param folder: Installatoin target folder
+    :param folder: Base installation folder for all the sites e.g. /srv/plone
     """
     from sh import apt_get
 
@@ -406,7 +389,7 @@ def has_user(user):
         return False
 
 
-def create_plone_unix_user(site_name):
+def create_plone_unix_user(name):
     """ Create a UNIX user for the site.
 
     Each site has its own UNIX user for security. Only this user has
@@ -415,8 +398,6 @@ def create_plone_unix_user(site_name):
     either sudo in as a site user or give the users SSH keys.
     """
     from sh import adduser
-
-    name = get_unix_user(site_name)
 
     if not has_user(name):
         print "Creating UNIX user: %s" % name
@@ -502,21 +483,21 @@ def create_site_base(name, folder, username):
     """
     check_known_environment()
 
-    create_base(folder)
+    base_folder = os.path.dirname(folder)
+
+    create_base(base_folder)
 
     create_plone_unix_user(username)
 
     # Enable friendly
     give_user_ztanesh(username)
 
-    folder = get_site_folder(name)
-
     with sudo:
         print "Creating a Plone site %s folder %s for UNIX user %s" % (name, folder, username)
         install("-d", folder)
         reset_permissions(username, folder)
 
-    create_site_initd_script(name)
+    create_site_initd_script(name, folder, username)
 
     print "Site base (re)created: %s" % folder
 
@@ -562,7 +543,11 @@ def copy_site_files(source, target):
 
 def rebootstrap_site(name, folder, python, mr_developer=False):
     """
-    (Re)run buildout.
+    (Re)run bootstrap.py & buildout.
+
+    This will make Plone buildout.cfg setup pull are Python
+    code needed to run the site from pypi.python.org and
+    various other sources. This includes site addon code.
 
     Sudo first before doing this.
 
@@ -632,7 +617,7 @@ def fix_bootstrap_py(folder):
     curl("-L", "-o", bootstrap_py, url)
 
 
-def migrate_site(name, source, python):
+def migrate_site(name, folder, unix_user, source, python):
     """
     Migrate a Plone site from another server.
 
@@ -648,13 +633,9 @@ def migrate_site(name, source, python):
 
     create_site_base(name)
 
-    folder = get_site_folder(name)
-    unix_user = get_unix_user(name)
-
     allow_non_root_user_to_share_ssh_agent_forwarding(unix_user)
 
     with sudo(H=True, i=True, u=unix_user, _with=True):
-        folder = get_site_folder(name)
         copy_site_files(source, folder)
 
         # Reinstall bootstrap which might have been worn out by time
@@ -673,21 +654,17 @@ def migrate_site(name, source, python):
     print "Migrated site %s and it appears to be working" % name
 
 
-def check_startup(name):
+def check_startup(name, folder, unix_user):
     """
     Check that the site is ok for this script and related sysdmin tasks.
 
     :param name: Plone installation name
     """
-    folder = get_site_folder(name)
-
-    user = get_unix_user(name)
-
     if not os.path.exists(folder):
         sys.exit("Folder does not exist: %s" % folder)
 
-    if not has_user(user):
-        sys.exit("No UNIX user on the server: %s" % user)
+    if not has_user(unix_user):
+        sys.exit("No UNIX user on the server: %s" % unix_user)
 
     # Detect a running Plone site by a ZODB database lock file
     for lock_file in ["instance.lock", "client1.lock"]:
@@ -710,8 +687,6 @@ def check_startup(name):
             return True
 
     zope_ready_checker.success = False
-
-    unix_user = get_unix_user(name)
 
     # Do Zope standalone check
     with sudo(H=True, i=True, u=unix_user, _with=True):
@@ -790,7 +765,6 @@ def buildout_check(name):
     Checks that buildout.cfg file works and builds a working Plone site.
     """
     # TODO
-
 
 
 def get_plone_processes(folder, zeo_type):
@@ -943,7 +917,7 @@ def install_plone(name, folder, unix_user, python, version, mode):
         rm("-rf", temp_folder)
 
     # Integrate with LSB
-    create_site_base(name)
+    create_site_base(name, folder, unix_user)
 
     # Restrict FS access over what unified installer did for us
     reset_permissions(unix_user, folder)
@@ -988,7 +962,7 @@ def fix_buildout(folder):
     mode=("Installation mode: 'standalone' or 'cluster'", "option", "im", None, None, "clusten"),
     version=("Which Plone version to install. Defaults the latest stable", "option", "v", None, None),
     user=("UNIX user which we use for create, migration and install. Defaults to installation folder name", "option", "u", None, None),
-    folder=("Installation folder name", "positional", None, None, None, "ploneinstallationname"),
+    folder=("Path to target folder", "positional", None, None, None, "ploneinstallationname"),
     source=("SSH source for the site migration", "positional", None, None, None, "user@server.com/~folder"),
     )
 def main(create, install, ploneversions, migrate, check, restartall, stopall, fixbuildout,
@@ -1007,18 +981,18 @@ def main(create, install, ploneversions, migrate, check, restartall, stopall, fi
 
     # XXX: Implement proper plac subcommands here so we do not need this if...else logic structure
     if create:
-        # XXX: get rid of setup_context() and pass explicit parameters
-        setup_context(folder, user)
-        create_site_base(get_site_name(), get_site_folder(), get_unix_user())
+        name, folder, user = setup_context(folder, user)
+        create_site_base(name, folder, user)
     elif install:
         # XXX: get rid of setup_context() and pass explicit parameters
-        setup_context(folder, user)
-        install_plone(get_site_name(), get_site_folder(), get_unix_user(), python, version, mode)
+        name, folder, user = setup_context(folder, user)
+        install_plone(name, folder, user, python, version, mode)
     elif migrate:
         # XXX: get rid of setup_context() and pass explicit parameters
-        setup_context(folder, user)
-        migrate_site(get_site_name(), source, python)
+        name, folder, user = setup_context(folder, user)
+        migrate_site(name, folder, user, source, python)
     elif check:
+        name, folder, user = setup_context(folder, user)
         check_startup(folder)
     elif ploneversions:
         print_plone_versions()

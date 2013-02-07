@@ -9,7 +9,9 @@
 
 
 # Where we will install a lot of Plones
-TESTPATH="/tmp/plonetool-test"
+# Allow run tests one by one by hand without teardown
+# with copy pasting
+export TESTPATH="/tmp/plonetool-test"
 
 set -e
 
@@ -17,16 +19,18 @@ set -e
 # return 0 if user exists
 #
 function has_user {
-    getent passwd $1
+    getent passwd $1 > /dev/null
     return $?
 }
 
+#
+# Clean up test installation from the server
+#
 function teardown {
+
+    set +e
     has_user senorita1 && userdel -r -f senorita1
     has_user senorita2 && userdel -r -f senorita2
-
-    # Tear down
-    set +e
     rm /etc/init.d/migration-test > /dev/null 2>&1
     rm /etc/init.d/senorita1 > /dev/null 2>&1
     rm /etc/init.d/senorita2 > /dev/null 2>&1
@@ -35,6 +39,9 @@ function teardown {
 }
 
 teardown
+
+# First run unit tests
+python -m unittest discover senorita.plonetool
 
 plonetool --ploneversions
 
@@ -50,10 +57,12 @@ plonetool --fixbuildout $TESTPATH/senorita2
 plonetool --install --mode cluster --user senorita2 $TESTPATH/senorita3
 
 # migrate over ssh
+# For ssh-add-id see https://github.com/miohtama/ztanesh/blob/master/zsh-scripts/bin/ssh-add-id
+ssh-add-id senorita2
 plonetool --migrate --user senorita11 $TESTPATH/migration-test senorita2@localhost:$TESTPATH/senorita2
 
 # check command
-plonetool --check tmp/plonetool-test/plone1
+plonetool --check $TESTPATH/plone1
 
 # restartall command
 plonetool --restartall $TESTPATH
@@ -61,7 +70,7 @@ plonetool --restartall $TESTPATH
 # stop all command
 plonetool --stopall $TESTPATH
 
-teardown()
+teardown
 
 echo "F*ck yeah it works"
 
