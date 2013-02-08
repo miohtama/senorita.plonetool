@@ -29,6 +29,7 @@ POSSIBLE_CLIENT_TEMPLATE_SECTIONS = "client_base", "client1", "head", "instance"
 ALLOW_HOSTS = """github.com
     *.python.org
     *.plone.org
+    bitbucket.org
     launchpad.net
 #    *.zope.org
 """
@@ -182,6 +183,20 @@ def set_allow_hosts(*cfgs):
     buildout.set("buildout", "allow-hosts", ALLOW_HOSTS)
 
 
+def remove_effective_user(*cfgs):
+    """
+    Remove effective-user directive as we don't want it, esp. after migration.
+
+    Otherwise misleading error message:
+
+    Error: only root can use -u USER to change users For help, use /tmp/plonetool-test/migration-test/bin/zeoserver -h
+    """
+    for buildout in cfgs:
+        for part in buildout.sections():
+            if buildout.has_option(part, "effective-user"):
+                buildout.remove_option(part, "effective-user")
+
+
 def knife_it(*buildouts):
     """
     Our buildout modification tasklist.
@@ -192,6 +207,7 @@ def knife_it(*buildouts):
     remove_buildout_cache(*buildouts)
     strip_clients_line(*buildouts)
     set_allow_hosts(*buildouts)
+    remove_effective_user(*buildouts)
 
 
 def write_buildout(path, buildout):

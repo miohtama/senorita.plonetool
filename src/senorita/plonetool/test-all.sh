@@ -15,7 +15,9 @@
 # with copy pasting
 export TESTPATH="/tmp/plonetool-test"
 
-set -e
+set -e # abort on error
+
+set -x verbose #echo on
 
 #
 # return 0 if user exists
@@ -53,11 +55,12 @@ python -m unittest discover senorita.plonetool
 
 plonetool --ploneversions
 
+# Empty installation test
 plonetool --create $TESTPATH/plone1 --user plone1
 rm -rf $TESTPATH/plone1
 
 # standalone install
-plonetool --install --user plone2 --port 54001 $TESTPATH/plone1
+plonetool --install --user plone1 --port 54001 $TESTPATH/plone1
 
 # buildout fix
 plonetool --fixbuildout $TESTPATH/plone1
@@ -65,9 +68,12 @@ plonetool --fixbuildout $TESTPATH/plone1
 # zeo cluster install
 plonetool --install --mode cluster --port 54002 --user plone2 $TESTPATH/plone2
 
-# migrate over ssh
+# Test migrate over SSH over a localhost loopback
 # For ssh-add-id see https://github.com/miohtama/ztanesh/blob/master/zsh-scripts/bin/ssh-add-id
-ssh-add-id plone2
+# Don't use SSH agent forwarding if one is set
+eval `ssh-agent`
+export SSH_AUTH_SOCK
+ssh-enable-authorized-key plone2
 plonetool --migrate --user plone1 $TESTPATH/migration-test plone2@localhost:$TESTPATH/plone2
 rm -rf $TESTPATH/migration-test > /dev/null
 

@@ -299,9 +299,14 @@ def register_ssh_agent_key_to_user(username):
 
     Just make sure your SSH agent is properly running and connected before execution.
     """
-    from sh import ssh_add_id
-    print "Register your public key to %s/.ssh/authorized_keys" % username
-    ssh_add_id(username)
+    try:
+        from sh import ssh_enable_authorized_key
+    except:
+        sys.exit("Need to have ZSH with ssh-add-id command https://github.com/miohtama/ztanesh/blob/master/zsh-scripts/bin/ssh-add-id")
+
+    print "Registering your public key to %s/.ssh/authorized_keys" % username
+    print "(In the case of hang here check your SSH terminal for a stale SSH agent)"
+    ssh_enable_authorized_key(username, _out=_unbuffered_stdout, _err=_unbuffered_stdout, _out_bufsize=0).wait()
 
 
 def create_python_env(folder):
@@ -456,6 +461,10 @@ def reset_permissions(username, folder):
     # Disable read access for other UNIX users
     chown("-R", "%s:%s" % (username, username), folder)
     chmod("-R", "o-rwx", folder)
+
+    # In the case someone has run the buildout as root and
+    # left badly owned, non-writable files around
+    chmod("-R", "u+rwx", folder)
 
 
 def create_site_initd_script(name, folder, username):
@@ -645,13 +654,24 @@ def migrate_site(name, folder, unix_user, source, python):
     allow_non_root_user_to_share_ssh_agent_forwarding(unix_user)
 
     with sudo(H=True, i=True, u=unix_user, _with=True):
+
+        # rsync may have bad permission settings leftover
+        # from the previous run which was interruped
+        reset_permissions(unix_user, folder)
+
         copy_site_files(source, folder)
+
+        # rsync may have bad permission settings leftover
+        # from the previous server
+        reset_permissions(unix_user, folder)
+
+        # Apply automatic buildout fixes.
+        # Must be done before boostrapping so that egg cache
+        # e.g. does not point to previous server
+        fix_buildout(folder)
 
         # Reinstall bootstrap which might have been worn out by time
         fix_bootstrap_py(folder)
-
-        # Apply automatic buildout fixes
-        fix_buildout(folder)
 
         print "Rebootstrapping site %s" % folder
         rebootstrap_site(name, folder, python, mr_developer=True)
@@ -691,7 +711,7 @@ def check_startup(name, folder, unix_user):
         """
         #_unbuffered_stdout.write(line)
         #_unbuffered_stdout.write("\n")
-        if "zope ready" in line.lower():
+        if "zope ready to handle requests" in line.lower():
             zope_ready_checker.success = True
             process.terminate()
             return True
@@ -709,7 +729,7 @@ def check_startup(name, folder, unix_user):
             print "Testing Plone site cluster mode startup at %s, max timeout %d seconds" % (folder, MAX_PLONE_STARTUP_TIME)
             # See that Plone starts
             plonectl("start", "zeoserver")
-            plonectl("fg", "client1",
+            exit_code = plonectl("fg", "client1",
                 _out=zope_ready_checker,
                 _err=zope_ready_checker,
                 _timeout=MAX_PLONE_STARTUP_TIME,
@@ -721,7 +741,7 @@ def check_startup(name, folder, unix_user):
 
             print "Testing Plone site standlone mode at %s, max timeout %d seconds" % (folder, MAX_PLONE_STARTUP_TIME)
             # See that Plone starts
-            plonectl("fg", "instance",
+            exit_code = plonectl("fg", "instance",
                 _out=zope_ready_checker,
                 _err=zope_ready_checker,
                 _timeout=MAX_PLONE_STARTUP_TIME,
@@ -733,7 +753,7 @@ def check_startup(name, folder, unix_user):
         print "Site starts ok %s" % folder
     else:
         # We did not get ok signal
-        sys.exit("Process was launched %s - but did not get Zope ready signal within the timeout" % plonectl)
+        sys.exit("Process was launched %s - but did not get Zope ready signal within the timeout. Exit code %d." % (plonectl, exit_code))
 
 
 def find_plone_sites(root="/srv/plone"):
@@ -1015,6 +1035,7 @@ def main(create, install, ploneversions, migrate, check, restartall, stopall, fi
     elif check:
         name, folder, user = setup_context(folder, user)
         check_startup(name, folder, user)
+        sys.exit(0)  # Let's give explicit OK exit code here
     elif ploneversions:
         print_plone_versions()
     elif restartall:
