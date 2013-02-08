@@ -221,6 +221,9 @@ Does
 
 * Sets up log rotate
 
+* If you give ``--enablessh`` your SSH agent's public key gets registered to
+  ``authorized_keys`` in the created UNIX user and you can SSH in
+
 Does not do
 
 * Set up site backups
@@ -273,9 +276,11 @@ It checks
 
 * plonectl command provided
 
-* ``bin/plonectl instance fg`` starts the site
+* ``bin/plonectl instance fg`` or ``bin/plonectl client1 fg`` starts the site
 
-The check cannot be performed against a running site.
+.. note ::
+
+    The check cannot be performed against a running site.
 
 Restart all Plone sites on the server
 --------------------------------------------
@@ -324,7 +329,11 @@ Automatizes
 
 * Add missing plonectl command
 
-* Strip out shared egg cache
+* Strip out shared egg cache (``../buildout-cache/eggs...``)
+
+* Add `allow-hosts <http://plone.293351.n2.nabble.com/allow-hosts-and-why-life-is-so-sad-even-if-drinking-beer-tp7563041.html>`_ to buildout.cfg
+
+* Workarond [unifiedinstaller] `bug <https://github.com/plone/plone.recipe.unifiedinstaller/issues/1>`_
 
 Security notes
 ==================

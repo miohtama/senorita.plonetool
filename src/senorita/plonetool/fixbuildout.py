@@ -25,6 +25,15 @@ from collections import OrderedDict
 POSSIBLE_CLIENT_TEMPLATE_SECTIONS = "client_base", "client1", "head", "instance"
 
 
+# http://opensourcehacker.com/2012/07/11/working-around-buildout-server-down-problems/
+ALLOW_HOSTS = """github.com
+    *.python.org
+    *.plone.org
+    launchpad.net
+#    *.zope.org
+"""
+
+
 def guess_client_base(*cfgs):
     """ Guess what's the master "ZEO client" template in buildout configuratio.
 
@@ -152,6 +161,27 @@ def fix_env_vars(*cfgs):
     """
 
 
+def strip_clients_line(*cfgs):
+    """ Uuurhgs.
+
+    https://github.com/plone/plone.recipe.unifiedinstaller/issues/1
+    """
+    for buildout in cfgs:
+        if buildout.has_section("unifiedinstaler"):
+            if buildout.has_option("unifiedinstaler", "clients"):
+                buildout.remove_option("unifiedinstaler", "clients")
+
+
+def set_allow_hosts(*cfgs):
+    """
+    Set allowed download hosts.
+
+    http://opensourcehacker.com/2012/07/11/working-around-buildout-server-down-problems/
+    """
+    buildout = cfgs[0]
+    buildout.set("buildout", "allow-hosts", ALLOW_HOSTS)
+
+
 def knife_it(*buildouts):
     """
     Our buildout modification tasklist.
@@ -160,6 +190,8 @@ def knife_it(*buildouts):
     add_logrotate(*buildouts)
     #add_random_hash(*buildouts)
     remove_buildout_cache(*buildouts)
+    strip_clients_line(*buildouts)
+    set_allow_hosts(*buildouts)
 
 
 def write_buildout(path, buildout):
@@ -229,11 +261,13 @@ def set_buildout_port(path, mode, port):
         print "Updating buildout.cfg port to %s" % port
         buildout.set("instance", "http-address", port)
     else:
+        zeo_address = "127.0.0.1:%d" % port
         print "Updating buildout.cfg port range to %s" % port
-        buildout.set("zeoserver",  "zeo-address", port)
+        buildout.set("zeoserver",  "zeo-address", zeo_address)
         port += 1
         for part in ["client1", "client2", "client3", "client4"]:
             if buildout.has_section(part):
                 buildout.set(part, "http-address", port)
+                buildout.set(part, "zeo-address", zeo_address)
 
     write_buildout(path, buildout)

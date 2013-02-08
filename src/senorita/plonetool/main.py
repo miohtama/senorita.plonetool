@@ -78,15 +78,8 @@ MAX_PLONE_STARTUP_TIME = 300
 # plac subcommands http://plac.googlecode.com/hg/doc/plac.html#implementing-subcommands
 commands = 'create', 'migrate', 'versions', 'restart', 'check', 'find'
 
-#: Target installation UNIX user
-_user = None
-
-#: Target installation folder
-_folder = None
-
-#: Target site name
-_site_name = None
-
+#: Include your SSH public key on the created users authorized_keys
+_enable_ssh = False
 
 def generate_password():
     """
@@ -298,6 +291,19 @@ def allow_non_root_user_to_share_ssh_agent_forwarding(username):
     setfacl("-m", "u:%s:x" % username, os.path.dirname(os.environ["SSH_AUTH_SOCK"]))
 
 
+def register_ssh_agent_key_to_user(username):
+    """
+    Register your current SSH agent exposed public key to a UNIX user.
+
+    After these you can SSH in as the user, without the password.
+
+    Just make sure your SSH agent is properly running and connected before execution.
+    """
+    from sh import ssh_add_id
+    print "Register your public key to %s/.ssh/authorized_keys" % username
+    ssh_add_id(username)
+
+
 def create_python_env(folder):
     """
     Compile a Python environment with various Python versions to run Plone.
@@ -403,6 +409,9 @@ def create_plone_unix_user(name):
         print "Creating UNIX user: %s" % name
         adduser("--disabled-password", "--gecos", '""', "--shell", "/bin/zsh", name)
         print "Password is disabled. Use sudo to play around as %s." % name
+
+    if _enable_ssh:
+        register_ssh_agent_key_to_user(name)
 
     return name
 
@@ -631,7 +640,7 @@ def migrate_site(name, folder, unix_user, source, python):
 
     allow_ssh_agent_thru_sudo()
 
-    create_site_base(name)
+    create_site_base(name, folder, unix_user)
 
     allow_non_root_user_to_share_ssh_agent_forwarding(unix_user)
 
@@ -642,8 +651,9 @@ def migrate_site(name, folder, unix_user, source, python):
         fix_bootstrap_py(folder)
 
         # Apply automatic buildout fixes
-        fix_buildout(os.path.join(folder, "buildout.cfg"))
+        fix_buildout(folder)
 
+        print "Rebootstrapping site %s" % folder
         rebootstrap_site(name, folder, python, mr_developer=True)
 
     # Make sure all file permissions are sane after migration
@@ -754,9 +764,6 @@ def find_plone_sites(root="/srv/plone"):
         if os.path.exists(os.path.join(path, "bin", "instance")):
             result.append((path, "zope", folder,))
 
-    if not result:
-        sys.exit("No Plone sites found at %s" % root)
-
     return result
 
 
@@ -787,40 +794,43 @@ def get_plone_processes(folder, zeo_type):
     return processes
 
 
-def restart_all():
+def restart_all(root_folder):
     """
     Restart all sites installed on the server.
 
     If sites are in ZEO front end clusters try to do soft restarts so that there is at least one client up all the time.
     """
 
-    for folder, zeo_type, name in find_plone_sites("/srv/plone"):
+    for folder, zeo_type, name in find_plone_sites(root_folder):
         processes = get_plone_processes(folder, zeo_type)
 
-    # Restart processes one by one
-    # so that there should be always
-    for p in processes:
-        print "Restarting process %s" % p
-        cmd = Command(p)
-        cmd("stop")
-        if not p.endswith("zeoserver"):
-            # Don't mess with database server too long
-            time.sleep(20)
-        cmd("start")
+        # Restart processes one by one
+        # so that there should be always
+        for p in processes:
+            print "Restarting process %s" % p
+            cmd = Command(p)
+            cmd("stop")
+            if not p.endswith("zeoserver"):
+                # Don't mess with database server too long
+                time.sleep(20)
+            cmd("start")
 
 
-def stop_all():
+def stop_all(root_folder):
     """
     Stop all sites installed on the server.
     """
 
-    for folder, zeo_type, name in find_plone_sites("/srv/plone"):
+    for folder, zeo_type, name in find_plone_sites(root_folder):
         processes = get_plone_processes(folder, zeo_type)
 
-    for p in processes:
-        print "Restarting process %s" % p
-        cmd = Command(p)
-        cmd("stop")
+        for p in processes:
+            print "Stopping process %s" % p
+            cmd = Command(p)
+            try:
+                cmd("stop")
+            except:
+                print "Failed to run stop on %s" % p
 
 
 def get_plone_versions():
@@ -945,6 +955,7 @@ def fix_buildout(folder):
 
     :param fpath: Path to the buildout.cfg
     """
+    print "Updating buildout at %s" % folder
     path = folder
     buildout_cfg_path = os.path.join(path, "buildout.cfg")
     base_cfg_path = os.path.join(path, "base.cfg")
@@ -963,6 +974,7 @@ def fix_buildout(folder):
     python=("Which Python interpreter is used for a migrated site", "option", "p", None, None, "/srv/plone/python/python-2.7/bin/python"),
     mode=("Installation mode: 'standalone' or 'cluster'", "option", "im", None, None, "clusten"),
     version=("Which Plone version to install. Defaults the latest stable", "option", "v", None, None),
+    enablessh=("Register your SSH agent's public key to a created UNIX user's authorized_keys", "flag", "ssh", None, None),
     user=("UNIX user which we use for create, migration and install. Defaults to installation folder name", "option", "u", None, None),
     port=("HTTP port or port range start for new installations", "option", "po", None, None),
     folder=("Path to target folder", "positional", None, None, None, "ploneinstallationname"),
@@ -974,6 +986,7 @@ def main(create, install, ploneversions, migrate, check, restartall, stopall, fi
     mode="standalone",
     port=8080,
     user=None,
+    enablessh=False,
     folder="/srv/plone/mysite",
     source=None):
     """
@@ -984,15 +997,18 @@ def main(create, install, ploneversions, migrate, check, restartall, stopall, fi
     """
 
     # XXX: Implement proper plac subcommands here so we do not need this if...else logic structure
+
+    # XXX: Pass this explicitly around in functions
+    global _enable_ssh
+    _enable_ssh = enablessh
+
     if create:
         name, folder, user = setup_context(folder, user)
         create_site_base(name, folder, user)
     elif install:
-        # XXX: get rid of setup_context() and pass explicit parameters
         name, folder, user = setup_context(folder, user)
         install_plone(name, folder, user, python, version, mode, port)
     elif migrate:
-        # XXX: get rid of setup_context() and pass explicit parameters
         name, folder, user = setup_context(folder, user)
         migrate_site(name, folder, user, source, python)
     elif check:
