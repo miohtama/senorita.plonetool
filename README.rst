@@ -430,6 +430,10 @@ A command-line script which executes all commands against an empty (discarable) 
     . ~/senorita.plonetool/venv/bin/activate
     ~/senorita.plonetool/src/senorita/plonetool/test-all.sh
 
+.. note ::
+
+    It is not safe to run this command on a server with other production Plone instances.
+
 Please note that running this is extremery slow. If you have
 failing cases consider re-run them by hand by copy-pasting them from the script.
 

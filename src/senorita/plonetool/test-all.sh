@@ -4,6 +4,8 @@
 # Note that running this command will pollute your server, so use
 # discardable VM.
 #
+# Note: It is *NOT* safe to run this script on the production site with other Plones running.
+#
 # Run under virtualenv
 #
 
@@ -29,6 +31,10 @@ function has_user {
 function teardown {
 
     set +e
+    # Make sure we have not old leftover processes reserving our ports
+    pkill -f zeoserver
+    pkill -f instance
+    pkill -f client1
     has_user plone1 && userdel -r -f plone1
     has_user plone2 && userdel -r -f plone2
     rm /etc/init.d/migration-test > /dev/null 2>&1
@@ -66,9 +72,9 @@ plonetool --migrate --user plone1 $TESTPATH/migration-test plone2@localhost:$TES
 rm -rf $TESTPATH/migration-test > /dev/null
 
 # check command
-plonetool --user plone1 --check $TESTPATH/plone1
+plonetool --check $TESTPATH/plone1
 
-plonetool --user plone2 --check $TESTPATH/plone2
+plonetool --check $TESTPATH/plone2
 
 # restartall command: start plone1, plone2
 plonetool --restartall $TESTPATH

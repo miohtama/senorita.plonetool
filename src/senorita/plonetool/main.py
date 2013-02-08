@@ -72,7 +72,7 @@ DEBIAN_BOOT_TEMPLATE = read_template("lsb-init.template.sh")
 
 # How fast Plone site bin/instance must come up before
 # we assume it's defunct
-MAX_PLONE_STARTUP_TIME = 300
+MAX_PLONE_STARTUP_TIME = 600
 
 
 # plac subcommands http://plac.googlecode.com/hg/doc/plac.html#implementing-subcommands
@@ -733,7 +733,7 @@ def check_startup(name, folder, unix_user):
         print "Site starts ok %s" % folder
     else:
         # We did not get ok signal
-        sys.exit("Could not start %s - please run on foreground by hand" % folder)
+        sys.exit("Process was launched %s - but did not get Zope ready signal within the timeout" % plonectl)
 
 
 def find_plone_sites(root="/srv/plone"):
@@ -783,11 +783,12 @@ def get_plone_processes(folder, zeo_type):
 
     if zeo_type == "zeo":
         # Get all binaries we need to restart
+        processes.append(os.path.join(folder, "bin", "zeoserver"))
+
         for x in range(1, 12):
             bin_name = os.path.join(folder, "bin", "client%d" % x)
             if os.path.exists(bin_name):
                 processes.append(bin_name)
-        processes.append(os.path.join(folder, "bin", "zeoserver"))
     else:
         processes.append(os.path.join(folder, "bin", "instance"))
 
@@ -812,7 +813,7 @@ def restart_all(root_folder):
             cmd("stop")
             if not p.endswith("zeoserver"):
                 # Don't mess with database server too long
-                time.sleep(20)
+                time.sleep(2)
             cmd("start")
 
 
