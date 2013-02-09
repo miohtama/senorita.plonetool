@@ -73,7 +73,18 @@ plonetool --install --mode cluster --port 54002 --user plone2 $TESTPATH/plone2
 # Don't use SSH agent forwarding if one is set
 eval `ssh-agent`
 export SSH_AUTH_SOCK
-ssh-enable-authorized-key plone2
+# http://stackoverflow.com/questions/3659602/bash-script-for-generating-ssh-keys
+install -d /home/plone1/.ssh
+chown -R plone1:plone1 /home/plone1/.ssh
+if [[ -e /home/plone1/.ssh/id_rsa ]]
+then
+    rm -rf /home/plone1/.ssh/*
+fi
+sudo -i -u plone1 bash -c 'ssh-keygen -t rsa -N "" -f /home/plone1/.ssh/id_rsa'
+# Allow plone1 user to SSH passwordless in to plone2
+ssh-enable-authorized-key plone2 "`cat /home/plone1/.ssh/id_rsa.pub`"
+# Get rid of fingerprint checking dialog
+sudo -i -u plone1 ssh -oStrictHostKeyChecking=no plone2@localhost echo ""
 plonetool --migrate --user plone1 $TESTPATH/migration-test plone2@localhost:$TESTPATH/plone2
 rm -rf $TESTPATH/migration-test > /dev/null
 
