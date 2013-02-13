@@ -540,6 +540,7 @@ def copy_site_files(source, target):
         "--exclude", "*.lock",  # Data.fs.lock, instance.lock
         "--exclude", "*.pid",
         "--exclude", "*.log",  # A lot of text data we probably don't need on the new server
+        "--exclude", "*.gz",  # Old rotated log files
         "--exclude", "eggs",
         "--exclude", "downloads",  # Redownload
         "--exclude", "parts",  # Buildout always regenerates this folder
