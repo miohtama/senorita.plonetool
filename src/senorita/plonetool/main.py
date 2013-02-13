@@ -541,8 +541,7 @@ def copy_site_files(source, target):
         "--exclude", "*.lock",  # Data.fs.lock, instance.lock
         "--exclude", "*.pid",
         "--exclude", "*.log",  # A lot of text data we probably don't need on the new server
-        "--exclude", "*.gz",  # Old rotated log files
-        "--exclude", "*.gz.*",  # Old rotated log files
+        "--exclude", "var/log/*",  # Old rotated log files
         "--exclude", "eggs",
         "--exclude", "downloads",  # Redownload
         "--exclude", "parts",  # Buildout always regenerates this folder
@@ -627,12 +626,12 @@ def fix_bootstrap_py(folder):
     """
     from sh import curl
 
-    bootstrap_py = os.path.join(folder, "boostrap.py")
+    bootstrap_py = os.path.join(folder, "bootstrap.py")
 
     # http://stackoverflow.com/questions/14817138/zc-buildout-2-0-0-release-somehow-ends-up-breaking-plone-3-3-buildouts/14817272#14817272
     url = "http://downloads.buildout.org/1/bootstrap.py"
 
-    print "Fixing %s/bootstrap.py to known good version" % folder
+    print "Fixing %s to known good version" % bootstrap_py
 
     curl("-L", "-o", bootstrap_py, url)
 
