@@ -104,5 +104,5 @@ plonetool --stopall $TESTPATH
 
 teardown
 
-echo "F*ck yeah it works"
+echo "senorita.plonetool testing suit succesfully complete"
 

@@ -626,10 +626,10 @@ def fix_bootstrap_py(folder):
 
     bootstrap_py = os.path.join(folder, "boostrap.py")
 
-    print "Updatong %s/bootstrap.py" % folder
-
     # http://stackoverflow.com/questions/14817138/zc-buildout-2-0-0-release-somehow-ends-up-breaking-plone-3-3-buildouts/14817272#14817272
     url = "http://downloads.buildout.org/1/bootstrap.py"
+
+    print "Fixing %s/bootstrap.py to known good version" % folder
 
     curl("-L", "-o", bootstrap_py, url)
 
