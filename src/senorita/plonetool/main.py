@@ -81,6 +81,7 @@ commands = 'create', 'migrate', 'versions', 'restart', 'check', 'find'
 #: Include your SSH public key on the created users authorized_keys
 _enable_ssh = False
 
+
 def generate_password():
     """
     Generates a random password for UNIX user.
@@ -541,6 +542,7 @@ def copy_site_files(source, target):
         "--exclude", "*.pid",
         "--exclude", "*.log",  # A lot of text data we probably don't need on the new server
         "--exclude", "*.gz",  # Old rotated log files
+        "--exclude", "*.gz.*",  # Old rotated log files
         "--exclude", "eggs",
         "--exclude", "downloads",  # Redownload
         "--exclude", "parts",  # Buildout always regenerates this folder
