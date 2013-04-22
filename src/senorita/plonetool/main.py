@@ -15,6 +15,9 @@ import tempfile
 import time
 import json
 
+from os import stat
+from pwd import getpwuid
+
 import plac
 import requests
 
@@ -213,6 +216,10 @@ def add_sudoers_option(line):
             chmod("u+x", tmp.name)
             Command(tmp.name)()
             rm(tmp.name)
+
+
+def find_owner(file):
+    return getpwuid(stat(file).st_uid).pw_name
 
 
 def require_ssh_agent():
@@ -829,13 +836,18 @@ def restart_all(root_folder):
         # Restart processes one by one
         # so that there should be always
         for p in processes:
-            print "Restarting process %s" % p
-            cmd = Command(p)
-            cmd("stop")
-            if not p.endswith("zeoserver"):
-                # Don't mess with database server too long
-                time.sleep(2)
-            cmd("start")
+
+            unix_user = find_owner(p)
+
+            print "Restarting process %s for user %s" % (p, unix_user)
+
+            with sudo(H=True, i=True, u=unix_user, _with=True):
+                cmd = Command(p)
+                cmd("stop")
+                if not p.endswith("zeoserver"):
+                    # Don't mess with database server too long
+                    time.sleep(2)
+                cmd("start")
 
 
 def stop_all(root_folder):
